@@ -348,7 +348,7 @@ class App:
         self._log(f"-> {text}")
         self._type_text(text + " ")
         if self.feedback:
-            self.feedback.notify("omnihear", text)
+            self.feedback.notify("omnihear", text, urgency="normal")
         if self.db:
             try:
                 self.db.insert(text, duration, elapsed_ms, self.cfg["model"],

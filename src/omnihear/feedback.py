@@ -40,7 +40,9 @@ class Feedback:
         import shutil
         import os
         player = None
-        for p in ["pw-play", "paplay", "aplay"]:
+        # aplay is ALSA-only and can't decode Ogg Vorbis (_BEEP_SOUNDS are
+        # .oga) -- it "succeeds" while playing the file as raw PCM noise.
+        for p in ["pw-play", "paplay"]:
             if shutil.which(p):
                 player = p
                 break
