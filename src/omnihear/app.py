@@ -57,73 +57,46 @@ class RecordingOverlay:
         self.root = tk.Tk()
         self.root.overrideredirect(True)
         self.root.attributes("-topmost", True)
-        
-        w, h = 100, 100
+
+        # Small dot, bottom-center of the screen (just above the taskbar) —
+        # near where the user is actually looking while typing, unlike the
+        # old top-right corner placement which sat outside their focus area.
+        w, h = 56, 56
         try:
             screen_w = self.root.winfo_screenwidth()
-            x = screen_w - w - 20
-            y = 20
+            screen_h = self.root.winfo_screenheight()
+            x = (screen_w - w) // 2
+            y = screen_h - h - 90
             self.root.geometry(f"{w}x{h}+{x}+{y}")
         except Exception:
-            self.root.geometry(f"{w}x{h}+1800+20")
-            
+            self.root.geometry(f"{w}x{h}+900+900")
+
         self.root.configure(bg="#1a1a19")
         try:
-            self.root.attributes("-alpha", 0.95)
+            self.root.attributes("-alpha", 0.92)
         except Exception:
             pass
 
         self.canvas = tk.Canvas(self.root, width=w, height=h, bg="#1a1a19", highlightthickness=0)
         self.canvas.pack(fill="both", expand=True)
 
-        def create_rounded_rect(x1, y1, x2, y2, r, **kwargs):
-            self.canvas.create_rectangle(x1+r, y1, x2-r, y2, width=0, **kwargs)
-            self.canvas.create_rectangle(x1, y1+r, x2, y2-r, width=0, **kwargs)
-            self.canvas.create_oval(x1, y1, x1+2*r, y1+2*r, width=0, **kwargs)
-            self.canvas.create_oval(x2-2*r, y1, x2, y1+2*r, width=0, **kwargs)
-            self.canvas.create_oval(x1, y2-2*r, x1+2*r, y2, width=0, **kwargs)
-            self.canvas.create_oval(x2-2*r, y2-2*r, x2, y2, width=0, **kwargs)
-
-        create_rounded_rect(18, 18, 82, 82, 10, fill="#2c3e50")
-        self.pulse_ring = self.canvas.create_oval(14, 14, 86, 86, outline="#3498db", width=2)
-
-        def bezier_points(p0, p1, p2, p3, steps=15):
-            pts = []
-            for i in range(steps + 1):
-                t = i / steps
-                x = (1-t)**3 * p0[0] + 3*(1-t)**2 * t * p1[0] + 3*(1-t) * t**2 * p2[0] + t**3 * p3[0]
-                y = (1-t)**3 * p0[1] + 3*(1-t)**2 * t * p1[1] + 3*(1-t) * t**2 * p2[1] + t**3 * p3[1]
-                pts.append((x, y))
-            return pts
-
-        pts = []
-        pts.extend(bezier_points((30, 50), (34, 42), (38, 42), (42, 50)))
-        pts.extend(bezier_points((42, 50), (46, 58), (50, 58), (54, 50))[1:])
-        pts.extend(bezier_points((54, 50), (58, 38), (62, 38), (66, 50))[1:])
-        
-        flat_pts = []
-        for p in pts:
-            flat_pts.extend(p)
-
-        self.canvas.create_line(flat_pts, fill="#26c6da", width=5, capstyle="round", joinstyle="round")
-
-        r = 2.4
-        self.canvas.create_oval(30-r, 50-r, 30+r, 50+r, fill="#3498db", width=0)
-        self.canvas.create_oval(70-r, 50-r, 70+r, 50+r, fill="#2ecc71", width=0)
-
-        self.canvas.create_text(50, 92, text="LISTENING", fill="#dde5ef", font=("Sans", 7, "bold"))
+        cx, cy = w / 2, h / 2
+        self.canvas.create_oval(2, 2, w - 2, h - 2, fill="#20242b", width=0)
+        self.pulse_ring = self.canvas.create_oval(cx - 14, cy - 14, cx + 14, cy + 14, outline="#e74c3c", width=2)
+        # Plain filled dot — the universal "recording" glyph, no busy waveform.
+        dot_r = 9
+        self.canvas.create_oval(cx - dot_r, cy - dot_r, cx + dot_r, cy + dot_r, fill="#e74c3c", width=0)
 
         self.root.withdraw()
         self.visible = False
         self.anim_step = 0
-        
+
         def animate():
             if self.visible:
                 self.anim_step = (self.anim_step + 1) % 20
-                scale = 14 + (self.anim_step % 10) * 0.4
-                self.canvas.coords(self.pulse_ring, 50-scale, 50-scale, 50+scale, 50+scale)
-                color = "#3498db" if (self.anim_step // 10) == 0 else "#2ecc71"
-                self.canvas.itemconfig(self.pulse_ring, outline=color)
+                scale = 14 + (self.anim_step % 10) * 1.2
+                self.canvas.coords(self.pulse_ring, cx - scale, cy - scale, cx + scale, cy + scale)
+                self.canvas.itemconfig(self.pulse_ring, width=2 if (self.anim_step % 10) < 7 else 1)
             if self.root:
                 self.root.after(80, animate)
 
