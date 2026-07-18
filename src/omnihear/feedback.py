@@ -37,8 +37,16 @@ class Feedback:
     def beep(self):
         if not self.beep_enabled:
             return
+        import shutil
+        import os
+        player = None
+        for p in ["pw-play", "paplay", "aplay"]:
+            if shutil.which(p):
+                player = p
+                break
+        if not player:
+            return
         for sound in _BEEP_SOUNDS:
-            import os
             if os.path.exists(sound):
-                self._run(["paplay", sound])
+                self._run([player, sound])
                 return

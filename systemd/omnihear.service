@@ -8,6 +8,7 @@ ExecStart=/usr/bin/omnihear
 Restart=on-failure
 RestartSec=3
 MemoryHigh=1G
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/%U/bus
 
 [Install]
 WantedBy=graphical-session.target
