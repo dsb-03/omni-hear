@@ -246,15 +246,11 @@ async function loadHistory() {
 }
 
 // --- settings form ---
-const KEY_NAMES = __KEY_NAMES__;  // canonical -> display name
-const MODELS = ['tiny.en','base.en','small.en','medium.en','large-v3',
-                'tiny','base','small','medium'];
-const LANGUAGES = [
-  ['auto','Auto-detect'], ['en','English'], ['hi','Hindi'], ['es','Spanish'],
-  ['fr','French'], ['de','German'], ['it','Italian'], ['pt','Portuguese'],
-  ['ru','Russian'], ['ja','Japanese'], ['ko','Korean'], ['zh','Chinese'],
-  ['ar','Arabic'],
-];
+const KEY_NAMES = __KEY_NAMES__;    // canonical -> display name
+const MODELS = __MODELS__;          // official faster-whisper model list
+const LANGUAGE_NAMES = __LANGS__;   // official code -> English name (100)
+const LANGUAGES = [['auto','Auto-detect']].concat(
+  Object.entries(LANGUAGE_NAMES).map(([c,n]) => [c, `${n} (${c})`]));
 const COMPUTE_TYPES = ['int8','float16','int8_float16','float32'];
 const BOOLS = ['dashboard','notify','beep','history','verbose'];
 const NUMBERS = {
@@ -297,9 +293,14 @@ function fieldHtml(k, v) {
   if (k === 'type_method') return selectOf(k, ['pynput','xdotool'], v);
   if (k === 'compute_type') return selectOf(k, COMPUTE_TYPES, v);
   if (k === 'model')
-    return customSelect(k, MODELS.map(m => [m, m]), v, 'model name');
+    return customSelect(k,
+      MODELS.map(m => [m, m === 'base.en' ? 'base.en (default)' : m]),
+      v, 'model name or HF repo id');
   if (k === 'language')
-    return customSelect(k, LANGUAGES, v, 'language code, e.g. nl');
+    return `<label>${pretty(k)}<select name="language">` +
+      LANGUAGES.map(([c, lab]) =>
+        `<option value="${c}"${c===v?' selected':''}>${esc(lab)}</option>`).join('') +
+      `</select></label>`;
   if (k === 'hotkey')
     return `<label>hotkey (push to talk)` +
       `<button type="button" id="hotkey-capture" data-value="${esc(v)}">` +
@@ -449,8 +450,13 @@ class DashboardHandler(BaseHTTPRequestHandler):
         qs = parse_qs(url.query)
         db = self.server.db
         if url.path in ("/", "/settings"):
-            page = PAGE.replace("__KEY_NAMES__",
-                                json.dumps(config_mod.KEY_DISPLAY_NAMES))
+            page = (PAGE
+                    .replace("__KEY_NAMES__",
+                             json.dumps(config_mod.KEY_DISPLAY_NAMES))
+                    .replace("__MODELS__",
+                             json.dumps(config_mod.MODEL_NAMES))
+                    .replace("__LANGS__",
+                             json.dumps(config_mod.LANGUAGE_NAMES)))
             self._send(200, page.encode(), "text/html; charset=utf-8")
         elif url.path == "/api/history":
             if db is None:

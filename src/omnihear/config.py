@@ -49,6 +49,50 @@ def validate_hotkey(name: str) -> str | None:
             return None
     return "+".join(parts)
 
+# Official faster-whisper model names (_MODELS in faster_whisper/utils.py),
+# grouped: English-only, multilingual, distilled/turbo. Custom HF repo ids
+# are also accepted, so this list feeds the UI dropdown, not validation.
+MODEL_NAMES = [
+    "tiny.en", "base.en", "small.en", "medium.en",
+    "tiny", "base", "small", "medium",
+    "large-v1", "large-v2", "large-v3", "large",
+    "distil-small.en", "distil-medium.en",
+    "distil-large-v2", "distil-large-v3", "distil-large-v3.5",
+    "large-v3-turbo", "turbo",
+]
+
+# Official faster-whisper language codes (_LANGUAGE_CODES in
+# faster_whisper/tokenizer.py) with the standard Whisper English display
+# names, in Whisper's rough by-usage order. "auto" (auto-detect) is
+# handled separately.
+LANGUAGE_NAMES = {
+    "en": "English", "zh": "Chinese", "de": "German", "es": "Spanish",
+    "ru": "Russian", "ko": "Korean", "fr": "French", "ja": "Japanese",
+    "pt": "Portuguese", "tr": "Turkish", "pl": "Polish", "ca": "Catalan",
+    "nl": "Dutch", "ar": "Arabic", "sv": "Swedish", "it": "Italian",
+    "id": "Indonesian", "hi": "Hindi", "fi": "Finnish", "vi": "Vietnamese",
+    "he": "Hebrew", "uk": "Ukrainian", "el": "Greek", "ms": "Malay",
+    "cs": "Czech", "ro": "Romanian", "da": "Danish", "hu": "Hungarian",
+    "ta": "Tamil", "no": "Norwegian", "th": "Thai", "ur": "Urdu",
+    "hr": "Croatian", "bg": "Bulgarian", "lt": "Lithuanian", "la": "Latin",
+    "mi": "Maori", "ml": "Malayalam", "cy": "Welsh", "sk": "Slovak",
+    "te": "Telugu", "fa": "Persian", "lv": "Latvian", "bn": "Bengali",
+    "sr": "Serbian", "az": "Azerbaijani", "sl": "Slovenian", "kn": "Kannada",
+    "et": "Estonian", "mk": "Macedonian", "br": "Breton", "eu": "Basque",
+    "is": "Icelandic", "hy": "Armenian", "ne": "Nepali", "mn": "Mongolian",
+    "bs": "Bosnian", "kk": "Kazakh", "sq": "Albanian", "sw": "Swahili",
+    "gl": "Galician", "mr": "Marathi", "pa": "Punjabi", "si": "Sinhala",
+    "km": "Khmer", "sn": "Shona", "yo": "Yoruba", "so": "Somali",
+    "af": "Afrikaans", "oc": "Occitan", "ka": "Georgian", "be": "Belarusian",
+    "tg": "Tajik", "sd": "Sindhi", "gu": "Gujarati", "am": "Amharic",
+    "yi": "Yiddish", "lo": "Lao", "uz": "Uzbek", "fo": "Faroese",
+    "ht": "Haitian Creole", "ps": "Pashto", "tk": "Turkmen", "nn": "Nynorsk",
+    "mt": "Maltese", "sa": "Sanskrit", "lb": "Luxembourgish", "my": "Myanmar",
+    "bo": "Tibetan", "tl": "Tagalog", "mg": "Malagasy", "as": "Assamese",
+    "tt": "Tatar", "haw": "Hawaiian", "ln": "Lingala", "ha": "Hausa",
+    "ba": "Bashkir", "jw": "Javanese", "su": "Sundanese", "yue": "Cantonese",
+}
+
 DEFAULTS = {
     "model": "base.en",
     "device": "cpu",
@@ -162,6 +206,13 @@ def validate_updates(updates: dict) -> tuple[dict, list[str]]:
     if "type_method" in clean and clean["type_method"] not in ("pynput", "xdotool"):
         errors.append("type_method must be pynput or xdotool")
         del clean["type_method"]
+    if "language" in clean:
+        lang = clean["language"].strip().lower()
+        if lang in ("", "auto") or lang in LANGUAGE_NAMES:
+            clean["language"] = lang or "auto"
+        else:
+            errors.append(f"unknown language code: {clean['language']!r}")
+            del clean["language"]
     if "hotkey" in clean:
         hk = validate_hotkey(clean["hotkey"])
         if hk:
