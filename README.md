@@ -26,6 +26,10 @@ omnihear --list-devices                    # list microphones
 omnihear --help                            # full CLI options
 ```
 
+The terminal stays quiet during normal use (transcriptions are visible in
+the web dashboard); pass `--verbose` (or set `verbose = true`) to print
+per-transcription output for debugging.
+
 ## Web dashboard
 
 While omnihear runs, a local-only dashboard is served at

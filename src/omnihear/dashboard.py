@@ -8,6 +8,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 from . import config as config_mod
+from .config import SPECIAL_KEY_NAMES
 
 PAGE = """<!DOCTYPE html>
 <html lang="en">
@@ -73,11 +74,19 @@ input, select, button { font: inherit; color: var(--text); background: var(--car
   border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; }
 button { cursor: pointer; }
 button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
-.cfg-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px,1fr));
+.cfg-section { margin-bottom: 18px; }
+.cfg-section h3 { font-size: 13px; margin: 0 0 8px; color: var(--accent);
+  text-transform: uppercase; letter-spacing: .04em; }
+.cfg-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px,1fr));
   gap: 10px 16px; }
 .cfg-grid label { display: block; font-size: 12px; color: var(--text-2); }
-.cfg-grid input, .cfg-grid select { width: 100%; margin-top: 2px; }
-#cfg-msg { font-size: 13px; margin-left: 10px; color: var(--text-2); }
+.cfg-grid input:not([type=checkbox]), .cfg-grid select { width: 100%; margin-top: 2px; }
+label.check { display: flex !important; align-items: center; gap: 8px;
+  font-size: 14px !important; color: var(--text) !important; padding-top: 14px; }
+label.check input { width: 16px !important; height: 16px; accent-color: var(--accent); }
+#cfg-msg { font-size: 13px; margin-left: 10px; color: var(--text-2);
+  transition: opacity .6s; }
+#cfg-msg.ok { color: #0ca30c; font-weight: 600; }
 .bar { fill: var(--accent); }
 .axis { font-size: 11px; fill: var(--text-2); }
 svg { display: block; width: 100%; height: auto; }
@@ -114,7 +123,7 @@ svg { display: block; width: 100%; height: auto; }
   <section class="screen" id="screen-settings">
     <h2>Config</h2>
     <div class="card">
-      <form id="cfg" class="cfg-grid"></form>
+      <form id="cfg"></form>
       <div style="margin-top:12px">
         <button class="primary" id="save">Save config</button>
         <button id="restart" type="button">Restart service</button>
@@ -216,39 +225,103 @@ async function loadHistory() {
   ).join('') || '<tr><td colspan="6">No transcriptions.</td></tr>';
 }
 
-async function loadConfig() {
-  const cfg = await api('/api/config');
-  const bools = ['dashboard','notify','beep','history'];
-  $('#cfg').innerHTML = Object.entries(cfg).map(([k,v]) => {
-    if (bools.includes(k))
-      return `<label>${k}<select name="${k}">` +
-        `<option value="true"${v?' selected':''}>true</option>` +
-        `<option value="false"${v?'':' selected'}>false</option></select></label>`;
-    if (k === 'device')
-      return `<label>${k}<select name="${k}">` +
-        `<option${v==='cpu'?' selected':''}>cpu</option>` +
-        `<option${v==='cuda'?' selected':''}>cuda</option></select></label>`;
-    if (k === 'type_method')
-      return `<label>${k}<select name="${k}">` +
-        `<option${v==='pynput'?' selected':''}>pynput</option>` +
-        `<option${v==='xdotool'?' selected':''}>xdotool</option></select></label>`;
-    return `<label>${k}<input name="${k}" value="${esc(v)}"></label>`;
-  }).join('');
+// --- settings form ---
+const HOTKEYS = __HOTKEYS__;
+const MODELS = ['tiny.en','base.en','small.en','medium.en','large-v3',
+                'tiny','base','small','medium'];
+const COMPUTE_TYPES = ['int8','float16','int8_float16','float32'];
+const BOOLS = ['dashboard','notify','beep','history','verbose'];
+const NUMBERS = {
+  sample_rate: {min: 8000, step: 1000},
+  beam_size: {min: 1, step: 1},
+  min_duration: {min: 0, step: 0.1},
+  dashboard_port: {min: 1, max: 65535, step: 1},
+  idle_unload_minutes: {min: 0, step: 1},
+};
+const SECTIONS = [
+  ['Transcription', ['model','language','device','compute_type','beam_size']],
+  ['Input', ['hotkey','input_device','sample_rate','min_duration','type_method']],
+  ['Dashboard', ['dashboard','dashboard_port','history']],
+  ['Behavior', ['notify','beep','idle_unload_minutes','verbose']],
+];
+const pretty = k => k.replace(/_/g, ' ');
+const selectOf = (k, opts, v) => `<label>${pretty(k)}<select name="${k}">` +
+  opts.map(o => `<option value="${esc(o)}"${o===v?' selected':''}>${esc(o)}</option>`)
+      .join('') + `</select></label>`;
+
+function fieldHtml(k, v) {
+  if (BOOLS.includes(k))
+    return `<label class="check"><input type="checkbox" name="${k}"` +
+           `${v?' checked':''}>${pretty(k)}</label>`;
+  if (k === 'device') return selectOf(k, ['cpu','cuda'], v);
+  if (k === 'type_method') return selectOf(k, ['pynput','xdotool'], v);
+  if (k === 'compute_type') return selectOf(k, COMPUTE_TYPES, v);
+  if (k === 'hotkey') {
+    const known = HOTKEYS.includes(v);
+    return `<label>hotkey<select name="hotkey" id="hotkey-sel">` +
+      HOTKEYS.map(h => `<option value="${h}"${h===v?' selected':''}>${h}</option>`).join('') +
+      `<option value="__custom__"${known?'':' selected'}>custom character\\u2026</option>` +
+      `</select><input id="hotkey-custom" maxlength="1" placeholder="single character"` +
+      ` value="${known?'':esc(v)}" style="margin-top:6px;` +
+      `display:${known?'none':'block'}"></label>`;
+  }
+  if (k === 'model')
+    return `<label>${pretty(k)}<input name="${k}" list="model-list" value="${esc(v)}">` +
+      `</label><datalist id="model-list">` +
+      MODELS.map(m => `<option value="${m}">`).join('') + `</datalist>`;
+  if (k in NUMBERS) {
+    const n = NUMBERS[k];
+    return `<label>${pretty(k)}<input type="number" name="${k}" value="${esc(v)}"` +
+      ` min="${n.min}"${n.max?` max="${n.max}"`:''} step="${n.step}"></label>`;
+  }
+  return `<label>${pretty(k)}<input name="${k}" value="${esc(v)}"></label>`;
 }
 
-$('#save').addEventListener('click', async e => {
-  e.preventDefault();
-  const data = Object.fromEntries(new FormData($('#cfg')).entries());
+async function loadConfig() {
+  const cfg = await api('/api/config');
+  $('#cfg').innerHTML = SECTIONS.map(([title, keys]) =>
+    `<div class="cfg-section"><h3>${title}</h3><div class="cfg-grid">` +
+    keys.filter(k => k in cfg).map(k => fieldHtml(k, cfg[k])).join('') +
+    `</div></div>`).join('');
+  const sel = $('#hotkey-sel');
+  if (sel) sel.addEventListener('change', () => {
+    $('#hotkey-custom').style.display =
+      sel.value === '__custom__' ? 'block' : 'none';
+  });
+}
+
+function showMsg(text, ok) {
+  const m = $('#cfg-msg');
+  m.textContent = text;
+  m.classList.toggle('ok', !!ok);
+  m.style.opacity = 1;
+  if (ok) setTimeout(() => { m.style.opacity = 0; }, 2500);
+}
+
+async function saveConfig() {
+  const form = $('#cfg');
+  const data = {};
+  for (const [, keys] of SECTIONS) for (const k of keys) {
+    const el = form.elements[k];
+    if (!el) continue;
+    if (BOOLS.includes(k)) data[k] = el.checked;
+    else if (k === 'hotkey')
+      data[k] = el.value === '__custom__' ? $('#hotkey-custom').value : el.value;
+    else data[k] = el.value;
+  }
   const res = await api('/api/config',
     {method:'POST', headers:{'Content-Type':'application/json'},
      body: JSON.stringify(data)});
-  $('#cfg-msg').textContent = res.errors && res.errors.length
-    ? 'Errors: ' + res.errors.join('; ') : res.message;
-});
+  if (res.errors && res.errors.length)
+    showMsg('Errors: ' + res.errors.join('; '), false);
+  else showMsg('\\u2713 ' + res.message, true);
+}
+$('#cfg').addEventListener('submit', e => { e.preventDefault(); saveConfig(); });
+$('#save').addEventListener('click', e => { e.preventDefault(); saveConfig(); });
 
 $('#restart').addEventListener('click', async () => {
   const res = await api('/api/restart', {method:'POST'});
-  $('#cfg-msg').textContent = res.message;
+  showMsg(res.message, false);
 });
 
 let t; $('#q').addEventListener('input',
@@ -281,7 +354,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
         qs = parse_qs(url.query)
         db = self.server.db
         if url.path in ("/", "/settings"):
-            self._send(200, PAGE.encode(), "text/html; charset=utf-8")
+            page = PAGE.replace("__HOTKEYS__", json.dumps(SPECIAL_KEY_NAMES))
+            self._send(200, page.encode(), "text/html; charset=utf-8")
         elif url.path == "/api/history":
             if db is None:
                 self._send(200, [])

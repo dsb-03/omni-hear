@@ -11,11 +11,9 @@ import sys
 import threading
 import time
 
-# Map of accepted hotkey string values, resolved lazily (needs pynput).
-SPECIAL_KEY_NAMES = [
-    "ctrl_r", "ctrl_l", "alt_r", "alt_l", "shift_r", "shift_l",
-    "caps_lock", "f9", "f10", "f11", "f12", "pause", "scroll_lock",
-]
+# Accepted hotkey names live in config.py (single source of truth,
+# shared with the dashboard); resolved lazily here since it needs pynput.
+from .config import SPECIAL_KEY_NAMES
 
 
 def resolve_hotkey(name):
@@ -45,6 +43,12 @@ class App:
         self._work_q = queue.Queue()
         self._recording = False
         self._stream = None
+        self._verbose = bool(cfg.get("verbose"))
+
+    def _log(self, msg):
+        """Per-transcription chatter; printed only with --verbose."""
+        if self._verbose:
+            print(msg)
 
     # -- status for the dashboard ------------------------------------
     def status(self) -> dict:
@@ -115,7 +119,7 @@ class App:
         )
         stream.start()
         self._stream = stream
-        print("Recording...")
+        self._log("Recording...")
 
     def _stop_recording(self):
         import numpy as np
@@ -130,16 +134,16 @@ class App:
         while not self._audio_q.empty():
             chunks.append(self._audio_q.get())
         if not chunks:
-            print("No audio captured.")
+            self._log("No audio captured.")
             return
         audio = np.concatenate(chunks, axis=0).flatten()
 
         duration = len(audio) / self.cfg["sample_rate"]
         if duration < self.cfg["min_duration"]:
-            print("Too short, ignoring.")
+            self._log("Too short, ignoring.")
             return
 
-        print(f"Queued {duration:.2f}s of audio for transcription...")
+        self._log(f"Queued {duration:.2f}s of audio for transcription...")
         self._work_q.put((audio, duration))
 
     # -- transcription worker -----------------------------------------
@@ -184,9 +188,9 @@ class App:
         memory_mb = self._rss_mb()
         self._last_used = time.monotonic()
         if not text:
-            print("(empty transcription)")
+            self._log("(empty transcription)")
             return
-        print(f"-> {text}")
+        self._log(f"-> {text}")
         self._type_text(text + " ")
         if self.feedback:
             self.feedback.notify("omnihear", text)

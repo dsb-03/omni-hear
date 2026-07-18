@@ -58,6 +58,10 @@ def build_parser(cfg: dict) -> argparse.ArgumentParser:
                    default=cfg["idle_unload_minutes"],
                    help="Unload the model after this many idle minutes "
                         "(0 = never unload).")
+    p.add_argument("--verbose", dest="verbose", action="store_true",
+                   default=cfg["verbose"],
+                   help="Print per-transcription output to the terminal "
+                        "(recording, queued audio, transcribed text).")
     p.add_argument("--write-config", action="store_true",
                    help="Write the current effective settings to "
                         f"{config_mod.config_path()} and exit.")

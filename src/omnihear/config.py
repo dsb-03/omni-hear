@@ -9,6 +9,13 @@ import os
 import tomllib
 from pathlib import Path
 
+# Valid special hotkey names (single source of truth; app.py resolves
+# these to pynput Key objects, the dashboard offers them in a dropdown).
+SPECIAL_KEY_NAMES = [
+    "ctrl_r", "ctrl_l", "alt_r", "alt_l", "shift_r", "shift_l",
+    "caps_lock", "f9", "f10", "f11", "f12", "pause", "scroll_lock",
+]
+
 DEFAULTS = {
     "model": "base.en",
     "device": "cpu",
@@ -26,6 +33,7 @@ DEFAULTS = {
     "beep": False,
     "history": True,
     "idle_unload_minutes": 10,
+    "verbose": False,
 }
 
 # Keys editable via the dashboard, with expected types.
@@ -121,6 +129,13 @@ def validate_updates(updates: dict) -> tuple[dict, list[str]]:
     if "type_method" in clean and clean["type_method"] not in ("pynput", "xdotool"):
         errors.append("type_method must be pynput or xdotool")
         del clean["type_method"]
+    if "hotkey" in clean:
+        hk = clean["hotkey"].strip().lower()
+        if hk in SPECIAL_KEY_NAMES or len(hk) == 1:
+            clean["hotkey"] = hk
+        else:
+            errors.append("hotkey must be a known key name or a single character")
+            del clean["hotkey"]
     for key in ("dashboard_port", "sample_rate", "beam_size"):
         if key in clean and clean[key] <= 0:
             errors.append(f"{key} must be positive")
