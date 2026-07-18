@@ -41,6 +41,120 @@ def parse_hotkey(name):
     return frozenset(resolve_key(p) for p in parts)
 
 
+class RecordingOverlay:
+    def __init__(self):
+        self.root = None
+        self.queue = queue.Queue()
+        self.thread = threading.Thread(target=self._run, daemon=True)
+        self.thread.start()
+
+    def _run(self):
+        try:
+            import tkinter as tk
+        except ImportError:
+            return
+
+        self.root = tk.Tk()
+        self.root.overrideredirect(True)
+        self.root.attributes("-topmost", True)
+        
+        w, h = 100, 100
+        try:
+            screen_w = self.root.winfo_screenwidth()
+            x = screen_w - w - 20
+            y = 20
+            self.root.geometry(f"{w}x{h}+{x}+{y}")
+        except Exception:
+            self.root.geometry(f"{w}x{h}+1800+20")
+            
+        self.root.configure(bg="#1a1a19")
+        try:
+            self.root.attributes("-alpha", 0.95)
+        except Exception:
+            pass
+
+        self.canvas = tk.Canvas(self.root, width=w, height=h, bg="#1a1a19", highlightthickness=0)
+        self.canvas.pack(fill="both", expand=True)
+
+        def create_rounded_rect(x1, y1, x2, y2, r, **kwargs):
+            self.canvas.create_rectangle(x1+r, y1, x2-r, y2, width=0, **kwargs)
+            self.canvas.create_rectangle(x1, y1+r, x2, y2-r, width=0, **kwargs)
+            self.canvas.create_oval(x1, y1, x1+2*r, y1+2*r, width=0, **kwargs)
+            self.canvas.create_oval(x2-2*r, y1, x2, y1+2*r, width=0, **kwargs)
+            self.canvas.create_oval(x1, y2-2*r, x1+2*r, y2, width=0, **kwargs)
+            self.canvas.create_oval(x2-2*r, y2-2*r, x2, y2, width=0, **kwargs)
+
+        create_rounded_rect(18, 18, 82, 82, 10, fill="#2c3e50")
+        self.pulse_ring = self.canvas.create_oval(14, 14, 86, 86, outline="#3498db", width=2)
+
+        def bezier_points(p0, p1, p2, p3, steps=15):
+            pts = []
+            for i in range(steps + 1):
+                t = i / steps
+                x = (1-t)**3 * p0[0] + 3*(1-t)**2 * t * p1[0] + 3*(1-t) * t**2 * p2[0] + t**3 * p3[0]
+                y = (1-t)**3 * p0[1] + 3*(1-t)**2 * t * p1[1] + 3*(1-t) * t**2 * p2[1] + t**3 * p3[1]
+                pts.append((x, y))
+            return pts
+
+        pts = []
+        pts.extend(bezier_points((30, 50), (34, 42), (38, 42), (42, 50)))
+        pts.extend(bezier_points((42, 50), (46, 58), (50, 58), (54, 50))[1:])
+        pts.extend(bezier_points((54, 50), (58, 38), (62, 38), (66, 50))[1:])
+        
+        flat_pts = []
+        for p in pts:
+            flat_pts.extend(p)
+
+        self.canvas.create_line(flat_pts, fill="#26c6da", width=5, capstyle="round", joinstyle="round")
+
+        r = 2.4
+        self.canvas.create_oval(30-r, 50-r, 30+r, 50+r, fill="#3498db", width=0)
+        self.canvas.create_oval(70-r, 50-r, 70+r, 50+r, fill="#2ecc71", width=0)
+
+        self.canvas.create_text(50, 92, text="LISTENING", fill="#dde5ef", font=("Sans", 7, "bold"))
+
+        self.root.withdraw()
+        self.visible = False
+        self.anim_step = 0
+        
+        def animate():
+            if self.visible:
+                self.anim_step = (self.anim_step + 1) % 20
+                scale = 14 + (self.anim_step % 10) * 0.4
+                self.canvas.coords(self.pulse_ring, 50-scale, 50-scale, 50+scale, 50+scale)
+                color = "#3498db" if (self.anim_step // 10) == 0 else "#2ecc71"
+                self.canvas.itemconfig(self.pulse_ring, outline=color)
+            if self.root:
+                self.root.after(80, animate)
+
+        def check_queue():
+            try:
+                while not self.queue.empty():
+                    action = self.queue.get_nowait()
+                    if action == "show":
+                        self.visible = True
+                        self.root.deiconify()
+                    elif action == "hide":
+                        self.visible = False
+                        self.root.withdraw()
+            except Exception:
+                pass
+            if self.root:
+                self.root.after(50, check_queue)
+
+        self.root.after(50, check_queue)
+        self.root.after(80, animate)
+        self.root.mainloop()
+
+    def show(self):
+        if self.thread.is_alive():
+            self.queue.put("show")
+
+    def hide(self):
+        if self.thread.is_alive():
+            self.queue.put("hide")
+
+
 class App:
     def __init__(self, cfg: dict, db=None, feedback=None):
         self.cfg = cfg
@@ -56,6 +170,11 @@ class App:
         self._recording = False
         self._stream = None
         self._verbose = bool(cfg.get("verbose"))
+        self._overlay = None
+        try:
+            self._overlay = RecordingOverlay()
+        except Exception as e:
+            print(f"omnihear: warning: overlay could not start: {e}")
 
     def _log(self, msg):
         """Per-transcription chatter; printed only with --verbose."""
@@ -69,6 +188,7 @@ class App:
             "hotkey": self.cfg["hotkey"],
             "hotkey_display": config_mod.hotkey_display(self.cfg["hotkey"]),
             "model_loaded": self._model is not None,
+            "recording": self._recording,
         }
 
     # -- model lifecycle ---------------------------------------------
@@ -121,6 +241,8 @@ class App:
         if self._recording:
             return
         self._recording = True
+        if self._overlay:
+            self._overlay.show()
         if self.feedback:
             self.feedback.beep()
         stream = sd.InputStream(
@@ -139,6 +261,8 @@ class App:
         if not self._recording:
             return
         self._recording = False
+        if self._overlay:
+            self._overlay.hide()
         stream = self._stream
         stream.stop()
         stream.close()
