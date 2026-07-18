@@ -1,0 +1,13 @@
+Package: omnihear
+Version: 1.0.0
+Section: utils
+Priority: optional
+Architecture: amd64
+Depends: python3 (>= 3.8), python3-venv, python3-pip, portaudio19-dev, libx11-6, libxtst6, libxi6, xdotool
+Maintainer: dsb <you@example.com>
+Description: Push-to-talk local Whisper transcription for X11
+ omnihear lets you hold a hotkey to record audio and have it
+ transcribed locally via faster-whisper (no cloud, no network calls
+ during use), then typed directly into whichever field has focus.
+ .
+ Requires an X11 session. Run `omnihear --help` for CLI options.

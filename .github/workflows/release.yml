@@ -1,0 +1,58 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Install packaging tools
+        run: sudo apt-get update && sudo apt-get install -y dpkg-dev apt-utils gnupg
+
+      - name: Build .deb
+        run: ./build-deb.sh "${{ steps.version.outputs.version }}"
+
+      - name: Import GPG signing key
+        run: |
+          echo "${{ secrets.GPG_PRIVATE_KEY }}" | base64 -d | gpg --batch --import
+        env:
+          GNUPGHOME: /home/runner/.gnupg
+
+      - name: Update signed APT repo
+        env:
+          GNUPGHOME: /home/runner/.gnupg
+          GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
+          GPG_TTY: /dev/tty
+        run: |
+          # allow non-interactive signing with a passphrase-protected key
+          echo "allow-loopback-pinentry" >> "$GNUPGHOME/gpg-agent.conf"
+          gpgconf --reload gpg-agent
+          export GPG_OPTS="--pinentry-mode loopback --passphrase ${{ secrets.GPG_PASSPHRASE }}"
+          ./scripts/update-apt-repo.sh "omnihear_${{ steps.version.outputs.version }}_amd64.deb"
+
+      - name: Commit and push updated repo
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add docs/
+          git commit -m "Publish omnihear ${{ steps.version.outputs.version }}"
+          git push
+
+      - name: Attach .deb to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: omnihear_${{ steps.version.outputs.version }}_amd64.deb
+
+      - name: Clean up signing key
+        if: always()
+        run: gpgconf --kill gpg-agent && rm -rf /home/runner/.gnupg
