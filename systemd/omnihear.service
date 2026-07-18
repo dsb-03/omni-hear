@@ -1,0 +1,13 @@
+[Unit]
+Description=omnihear push-to-talk transcription
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+ExecStart=/usr/bin/omnihear
+Restart=on-failure
+RestartSec=3
+MemoryHigh=1G
+
+[Install]
+WantedBy=graphical-session.target

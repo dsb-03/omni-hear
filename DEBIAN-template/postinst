@@ -13,6 +13,9 @@ python3 -m venv "$VENV_DIR"
 chmod -R go+rX "$APP_DIR"
 
 echo "omnihear: installed. Run 'omnihear --help' to get started."
+echo "omnihear: to run it as a background service:"
+echo "             systemctl --user enable --now omnihear"
+echo "omnihear: web dashboard (when running): http://127.0.0.1:4738"
 echo "omnihear: on first run, the Whisper model weights will be downloaded"
 echo "             from Hugging Face (also requires internet, one-time per model size)."
 

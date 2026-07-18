@@ -1,2 +1,3 @@
 #!/bin/bash
-exec /opt/omnihear/venv/bin/python3 /opt/omnihear/omnihear.py "$@"
+export PYTHONPATH="/opt/omnihear${PYTHONPATH:+:$PYTHONPATH}"
+exec /opt/omnihear/venv/bin/python3 -m omnihear "$@"
