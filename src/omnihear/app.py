@@ -13,10 +13,12 @@ import time
 
 # Accepted hotkey names live in config.py (single source of truth,
 # shared with the dashboard); resolved lazily here since it needs pynput.
+from . import config as config_mod
 from .config import SPECIAL_KEY_NAMES
 
 
-def resolve_hotkey(name):
+def resolve_key(name):
+    """Resolve a single canonical key name to a pynput key object."""
     from pynput import keyboard
     name = name.strip().lower()
     if name in SPECIAL_KEY_NAMES:
@@ -24,9 +26,19 @@ def resolve_hotkey(name):
     if len(name) == 1:
         return keyboard.KeyCode.from_char(name)
     raise ValueError(
-        f"Unrecognized hotkey '{name}'. Use one of {SPECIAL_KEY_NAMES} "
+        f"Unrecognized hotkey part '{name}'. Use one of {SPECIAL_KEY_NAMES} "
         "or a single character."
     )
+
+
+def parse_hotkey(name):
+    """Parse a canonical hotkey string ('f9', 'ctrl_l+space') into a
+    frozenset of pynput key objects. A single key is the degenerate
+    one-element combo, so existing configs keep working."""
+    parts = [p for p in name.strip().lower().split("+") if p]
+    if not parts:
+        raise ValueError("Empty hotkey.")
+    return frozenset(resolve_key(p) for p in parts)
 
 
 class App:
@@ -55,6 +67,7 @@ class App:
         return {
             "model": self.cfg["model"],
             "hotkey": self.cfg["hotkey"],
+            "hotkey_display": config_mod.hotkey_display(self.cfg["hotkey"]),
             "model_loaded": self._model is not None,
         }
 
@@ -174,9 +187,12 @@ class App:
         model = self._get_model()
         t0 = time.monotonic()
         cpu0 = time.process_time()
+        language = self.cfg["language"]
+        if language in ("", "auto"):
+            language = None  # let faster-whisper auto-detect
         segments, _ = model.transcribe(
             audio,
-            language=self.cfg["language"],
+            language=language,
             beam_size=self.cfg["beam_size"],
         )
         text = "".join(seg.text for seg in segments).strip()
@@ -205,22 +221,27 @@ class App:
     def run(self):
         from pynput import keyboard
 
-        hotkey = resolve_hotkey(self.cfg["hotkey"])
+        combo = parse_hotkey(self.cfg["hotkey"])
         self._kb_controller = keyboard.Controller()
 
         threading.Thread(target=self._worker_loop, daemon=True).start()
         threading.Thread(target=self._idle_unload_loop, daemon=True).start()
 
+        pressed = set()
+
         def on_press(key):
-            if key == hotkey:
-                self._start_recording()
+            if key in combo:
+                pressed.add(key)
+                if pressed == combo:
+                    self._start_recording()
 
         def on_release(key):
-            if key == hotkey:
+            if key in combo:
+                pressed.discard(key)
                 self._stop_recording()
 
-        print(f"Hold '{self.cfg['hotkey']}' to record, release to "
-              "transcribe & type. Ctrl+C to quit.")
+        print(f"Hold '{config_mod.hotkey_display(self.cfg['hotkey'])}' to "
+              "record, release to transcribe & type. Ctrl+C to quit.")
         print("Model loads lazily on first press; first transcription "
               "after load takes a few extra seconds.")
         with keyboard.Listener(on_press=on_press, on_release=on_release) as listener:

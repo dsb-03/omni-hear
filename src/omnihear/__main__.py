@@ -22,7 +22,8 @@ def build_parser(cfg: dict) -> argparse.ArgumentParser:
                    help="Compute precision, e.g. int8 (cpu), float16 (cuda).")
     p.add_argument("--hotkey", default=cfg["hotkey"],
                    help=f"Push-to-talk key. One of: {', '.join(SPECIAL_KEY_NAMES)} "
-                        "or a single character (e.g. 'q').")
+                        "or a single character (e.g. 'q'). Combos join parts "
+                        "with '+', e.g. 'ctrl_l+space'.")
     p.add_argument("--sample-rate", type=int, default=cfg["sample_rate"],
                    help="Audio sample rate in Hz.")
     p.add_argument("--type-method", default=cfg["type_method"],

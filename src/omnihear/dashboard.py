@@ -8,7 +8,6 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 from . import config as config_mod
-from .config import SPECIAL_KEY_NAMES
 
 PAGE = """<!DOCTYPE html>
 <html lang="en">
@@ -45,14 +44,19 @@ body { margin: 0; background: var(--surface); color: var(--text);
 .wrap { max-width: 960px; margin: 0 auto; padding: 24px 16px 48px; }
 header { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
 h1 { font-size: 20px; margin: 0; color: var(--accent); }
-h2 { font-size: 14px; margin: 26px 0 10px; color: var(--text-2);
-  text-transform: uppercase; letter-spacing: .05em; }
+h2 { font-size: 16px; font-weight: 600; margin: 26px 0 10px; color: var(--text); }
 nav { display: flex; gap: 4px; }
 nav a { padding: 6px 14px; border-radius: 6px; text-decoration: none;
   color: var(--text-2); font-size: 14px; }
 nav a.active { background: var(--accent-soft); color: var(--accent);
   font-weight: 600; }
-#theme-toggle { margin-left: auto; }
+#theme-toggle { margin-left: auto; display: flex; align-items: center;
+  padding: 7px; line-height: 0; }
+#theme-toggle svg { width: 18px; height: 18px; stroke: var(--text-2);
+  fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+#hotkey-capture { width: 100%; margin-top: 2px; text-align: left; }
+#hotkey-capture.capturing { outline: 2px solid var(--accent);
+  outline-offset: -1px; color: var(--accent); }
 #status { color: var(--text-2); font-size: 13px; margin-top: 4px; }
 .screen { display: none; }
 .screen.active { display: block; }
@@ -75,8 +79,8 @@ input, select, button { font: inherit; color: var(--text); background: var(--car
 button { cursor: pointer; }
 button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
 .cfg-section { margin-bottom: 18px; }
-.cfg-section h3 { font-size: 13px; margin: 0 0 8px; color: var(--accent);
-  text-transform: uppercase; letter-spacing: .04em; }
+.cfg-section h3 { font-size: 15px; font-weight: 600; margin: 0 0 8px;
+  color: var(--accent); }
 .cfg-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px,1fr));
   gap: 10px 16px; }
 .cfg-grid label { display: block; font-size: 12px; color: var(--text-2); }
@@ -100,7 +104,15 @@ svg { display: block; width: 100%; height: auto; }
       <a href="#/" id="nav-history">History</a>
       <a href="#/settings" id="nav-settings">Settings</a>
     </nav>
-    <button id="theme-toggle" type="button" title="Toggle light/dark">◐ theme</button>
+    <button id="theme-toggle" type="button" aria-label="Toggle light/dark theme">
+      <svg id="icon-moon" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/>
+      </svg>
+      <svg id="icon-sun" viewBox="0 0 24 24" aria-hidden="true" style="display:none">
+        <circle cx="12" cy="12" r="4"/>
+        <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>
+      </svg>
+    </button>
   </header>
   <div id="status">loading…</div>
 
@@ -141,14 +153,22 @@ const esc = s => String(s).replace(/[&<>"]/g,
 const api = (p, opts) => fetch(p, opts).then(r => r.json());
 
 // --- theme toggle (persisted; default follows prefers-color-scheme) ---
+const effectiveTheme = () => document.documentElement.dataset.theme ||
+  (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+function updateThemeIcon() {
+  const dark = effectiveTheme() === 'dark';
+  // sun shown in dark mode (click = go light), moon in light mode
+  $('#icon-sun').style.display = dark ? 'block' : 'none';
+  $('#icon-moon').style.display = dark ? 'none' : 'block';
+}
 const savedTheme = localStorage.getItem('omnihear-theme');
 if (savedTheme) document.documentElement.dataset.theme = savedTheme;
+updateThemeIcon();
 $('#theme-toggle').addEventListener('click', () => {
-  const cur = document.documentElement.dataset.theme ||
-    (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
-  const next = cur === 'dark' ? 'light' : 'dark';
+  const next = effectiveTheme() === 'dark' ? 'light' : 'dark';
   document.documentElement.dataset.theme = next;
   localStorage.setItem('omnihear-theme', next);
+  updateThemeIcon();
 });
 
 // --- hash routing: #/ (History, home) and #/settings ---
@@ -167,7 +187,7 @@ function fmtSec(s) { return s >= 60 ? (s/60).toFixed(1)+' min' : s.toFixed(1)+' 
 async function loadStatus() {
   const s = await api('/api/status');
   $('#status').textContent =
-    `model ${s.model} · hotkey ${s.hotkey} · ` +
+    `model ${s.model} · hotkey ${s.hotkey_display || keyDisplay(s.hotkey)} · ` +
     (s.model_loaded ? 'model loaded in RAM' : 'model unloaded (loads on first press)');
 }
 
@@ -226,9 +246,15 @@ async function loadHistory() {
 }
 
 // --- settings form ---
-const HOTKEYS = __HOTKEYS__;
+const KEY_NAMES = __KEY_NAMES__;  // canonical -> display name
 const MODELS = ['tiny.en','base.en','small.en','medium.en','large-v3',
                 'tiny','base','small','medium'];
+const LANGUAGES = [
+  ['auto','Auto-detect'], ['en','English'], ['hi','Hindi'], ['es','Spanish'],
+  ['fr','French'], ['de','German'], ['it','Italian'], ['pt','Portuguese'],
+  ['ru','Russian'], ['ja','Japanese'], ['ko','Korean'], ['zh','Chinese'],
+  ['ar','Arabic'],
+];
 const COMPUTE_TYPES = ['int8','float16','int8_float16','float32'];
 const BOOLS = ['dashboard','notify','beep','history','verbose'];
 const NUMBERS = {
@@ -240,14 +266,28 @@ const NUMBERS = {
 };
 const SECTIONS = [
   ['Transcription', ['model','language','device','compute_type','beam_size']],
-  ['Input', ['hotkey','input_device','sample_rate','min_duration','type_method']],
+  ['Input', ['hotkey','sample_rate','min_duration','type_method']],
   ['Dashboard', ['dashboard','dashboard_port','history']],
   ['Behavior', ['notify','beep','idle_unload_minutes','verbose']],
 ];
 const pretty = k => k.replace(/_/g, ' ');
+const keyDisplay = hk => String(hk).split('+').filter(Boolean)
+  .map(p => KEY_NAMES[p] || p.toUpperCase()).join(' + ');
 const selectOf = (k, opts, v) => `<label>${pretty(k)}<select name="${k}">` +
   opts.map(o => `<option value="${esc(o)}"${o===v?' selected':''}>${esc(o)}</option>`)
       .join('') + `</select></label>`;
+
+// select with a "custom..." option that reveals a free-text input
+function customSelect(k, opts, v, placeholder) {
+  const known = opts.some(o => o[0] === v);
+  return `<label>${pretty(k)}<select name="${k}" id="${k}-sel" data-custom="1">` +
+    opts.map(([val, lab]) =>
+      `<option value="${esc(val)}"${val===v?' selected':''}>${esc(lab)}</option>`).join('') +
+    `<option value="__custom__"${known?'':' selected'}>custom\\u2026</option>` +
+    `</select><input id="${k}-custom" placeholder="${placeholder}"` +
+    ` value="${known?'':esc(v)}" style="margin-top:6px;` +
+    `display:${known?'none':'block'}"></label>`;
+}
 
 function fieldHtml(k, v) {
   if (BOOLS.includes(k))
@@ -256,19 +296,14 @@ function fieldHtml(k, v) {
   if (k === 'device') return selectOf(k, ['cpu','cuda'], v);
   if (k === 'type_method') return selectOf(k, ['pynput','xdotool'], v);
   if (k === 'compute_type') return selectOf(k, COMPUTE_TYPES, v);
-  if (k === 'hotkey') {
-    const known = HOTKEYS.includes(v);
-    return `<label>hotkey<select name="hotkey" id="hotkey-sel">` +
-      HOTKEYS.map(h => `<option value="${h}"${h===v?' selected':''}>${h}</option>`).join('') +
-      `<option value="__custom__"${known?'':' selected'}>custom character\\u2026</option>` +
-      `</select><input id="hotkey-custom" maxlength="1" placeholder="single character"` +
-      ` value="${known?'':esc(v)}" style="margin-top:6px;` +
-      `display:${known?'none':'block'}"></label>`;
-  }
   if (k === 'model')
-    return `<label>${pretty(k)}<input name="${k}" list="model-list" value="${esc(v)}">` +
-      `</label><datalist id="model-list">` +
-      MODELS.map(m => `<option value="${m}">`).join('') + `</datalist>`;
+    return customSelect(k, MODELS.map(m => [m, m]), v, 'model name');
+  if (k === 'language')
+    return customSelect(k, LANGUAGES, v, 'language code, e.g. nl');
+  if (k === 'hotkey')
+    return `<label>hotkey (push to talk)` +
+      `<button type="button" id="hotkey-capture" data-value="${esc(v)}">` +
+      `${esc(keyDisplay(v))}</button></label>`;
   if (k in NUMBERS) {
     const n = NUMBERS[k];
     return `<label>${pretty(k)}<input type="number" name="${k}" value="${esc(v)}"` +
@@ -277,16 +312,75 @@ function fieldHtml(k, v) {
   return `<label>${pretty(k)}<input name="${k}" value="${esc(v)}"></label>`;
 }
 
+// --- hotkey capture: map KeyboardEvent.code -> canonical pynput names ---
+const CODE_MAP = {
+  ControlRight:'ctrl_r', ControlLeft:'ctrl_l', AltLeft:'alt_l', AltRight:'alt_r',
+  ShiftLeft:'shift_l', ShiftRight:'shift_r', Space:'space', CapsLock:'caps_lock',
+  Pause:'pause', ScrollLock:'scroll_lock',
+};
+for (let i = 1; i <= 12; i++) CODE_MAP['F'+i] = 'f'+i;
+function codeToName(code) {
+  if (CODE_MAP[code]) return CODE_MAP[code];
+  let m = code.match(/^Key([A-Z])$/);   if (m) return m[1].toLowerCase();
+  m = code.match(/^Digit([0-9])$/);     if (m) return m[1];
+  return null;
+}
+
+let capture = null;  // {seen:Set, active:Set, prev:string} while capturing
+
+function setupHotkeyCapture() {
+  const btn = $('#hotkey-capture');
+  if (!btn) return;
+  btn.addEventListener('click', () => {
+    if (capture) return;
+    capture = {seen: new Set(), active: new Set(), prev: btn.dataset.value};
+    btn.classList.add('capturing');
+    btn.textContent = 'Press keys\\u2026 (Esc to cancel)';
+  });
+}
+
+function endCapture(canceled) {
+  const btn = $('#hotkey-capture');
+  if (!btn || !capture) return;
+  if (canceled || !capture.seen.size) btn.dataset.value = capture.prev;
+  else btn.dataset.value = [...capture.seen].join('+');
+  btn.textContent = keyDisplay(btn.dataset.value);
+  btn.classList.remove('capturing');
+  capture = null;
+}
+
+document.addEventListener('keydown', e => {
+  if (!capture) return;
+  e.preventDefault();
+  if (e.key === 'Escape') { endCapture(true); return; }
+  if (e.repeat) return;
+  const name = codeToName(e.code);
+  if (!name) return;
+  capture.seen.add(name);
+  capture.active.add(name);
+  const btn = $('#hotkey-capture');
+  btn.textContent = keyDisplay([...capture.seen].join('+'));
+});
+document.addEventListener('keyup', e => {
+  if (!capture) return;
+  e.preventDefault();
+  const name = codeToName(e.code);
+  if (name) capture.active.delete(name);
+  if (capture.seen.size && !capture.active.size) endCapture(false);
+});
+
 async function loadConfig() {
   const cfg = await api('/api/config');
   $('#cfg').innerHTML = SECTIONS.map(([title, keys]) =>
     `<div class="cfg-section"><h3>${title}</h3><div class="cfg-grid">` +
     keys.filter(k => k in cfg).map(k => fieldHtml(k, cfg[k])).join('') +
     `</div></div>`).join('');
-  const sel = $('#hotkey-sel');
-  if (sel) sel.addEventListener('change', () => {
-    $('#hotkey-custom').style.display =
-      sel.value === '__custom__' ? 'block' : 'none';
+  setupHotkeyCapture();
+  document.querySelectorAll('select[data-custom]').forEach(sel => {
+    sel.addEventListener('change', () => {
+      $('#' + sel.name + '-custom').style.display =
+        sel.value === '__custom__' ? 'block' : 'none';
+    });
   });
 }
 
@@ -302,11 +396,12 @@ async function saveConfig() {
   const form = $('#cfg');
   const data = {};
   for (const [, keys] of SECTIONS) for (const k of keys) {
+    if (k === 'hotkey') { data[k] = $('#hotkey-capture').dataset.value; continue; }
     const el = form.elements[k];
     if (!el) continue;
     if (BOOLS.includes(k)) data[k] = el.checked;
-    else if (k === 'hotkey')
-      data[k] = el.value === '__custom__' ? $('#hotkey-custom').value : el.value;
+    else if (el.dataset && el.dataset.custom)
+      data[k] = el.value === '__custom__' ? $('#' + k + '-custom').value : el.value;
     else data[k] = el.value;
   }
   const res = await api('/api/config',
@@ -354,7 +449,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
         qs = parse_qs(url.query)
         db = self.server.db
         if url.path in ("/", "/settings"):
-            page = PAGE.replace("__HOTKEYS__", json.dumps(SPECIAL_KEY_NAMES))
+            page = PAGE.replace("__KEY_NAMES__",
+                                json.dumps(config_mod.KEY_DISPLAY_NAMES))
             self._send(200, page.encode(), "text/html; charset=utf-8")
         elif url.path == "/api/history":
             if db is None:

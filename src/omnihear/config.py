@@ -10,11 +10,44 @@ import tomllib
 from pathlib import Path
 
 # Valid special hotkey names (single source of truth; app.py resolves
-# these to pynput Key objects, the dashboard offers them in a dropdown).
+# these to pynput Key objects, the dashboard uses them for key capture).
 SPECIAL_KEY_NAMES = [
     "ctrl_r", "ctrl_l", "alt_r", "alt_l", "shift_r", "shift_l",
-    "caps_lock", "f9", "f10", "f11", "f12", "pause", "scroll_lock",
+    "caps_lock", "space", "pause", "scroll_lock",
+    "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12",
 ]
+
+# Human-readable display names for the UI. The config file always stores
+# the canonical (left column) name.
+KEY_DISPLAY_NAMES = {
+    "ctrl_r": "Ctrl Right", "ctrl_l": "Ctrl Left",
+    "alt_r": "Alt Right", "alt_l": "Alt Left",
+    "shift_r": "Shift Right", "shift_l": "Shift Left",
+    "caps_lock": "Caps Lock", "space": "Space",
+    "pause": "Pause", "scroll_lock": "Scroll Lock",
+    **{f"f{i}": f"F{i}" for i in range(1, 13)},
+}
+
+
+def hotkey_display(name: str) -> str:
+    """Human-readable form of a canonical hotkey string, e.g.
+    'ctrl_l+space' -> 'Ctrl Left + Space'."""
+    parts = [p for p in name.strip().lower().split("+") if p]
+    return " + ".join(KEY_DISPLAY_NAMES.get(p, p.upper()) for p in parts)
+
+
+def validate_hotkey(name: str) -> str | None:
+    """Return the canonical combo string, or None if invalid.
+
+    Accepts single keys ('f9', 'q') and '+'-joined combos ('ctrl_l+space').
+    """
+    parts = [p.strip() for p in str(name).strip().lower().split("+")]
+    if not parts or any(not p for p in parts):
+        return None
+    for p in parts:
+        if p not in SPECIAL_KEY_NAMES and len(p) != 1:
+            return None
+    return "+".join(parts)
 
 DEFAULTS = {
     "model": "base.en",
@@ -130,11 +163,12 @@ def validate_updates(updates: dict) -> tuple[dict, list[str]]:
         errors.append("type_method must be pynput or xdotool")
         del clean["type_method"]
     if "hotkey" in clean:
-        hk = clean["hotkey"].strip().lower()
-        if hk in SPECIAL_KEY_NAMES or len(hk) == 1:
+        hk = validate_hotkey(clean["hotkey"])
+        if hk:
             clean["hotkey"] = hk
         else:
-            errors.append("hotkey must be a known key name or a single character")
+            errors.append("hotkey must be known key names or single characters, "
+                          "joined with '+' for combos")
             del clean["hotkey"]
     for key in ("dashboard_port", "sample_rate", "beam_size"):
         if key in clean and clean[key] <= 0:
