@@ -154,16 +154,34 @@ class App:
                     self.feedback.notify("omnihear error", str(e),
                                          urgency="normal")
 
+    @staticmethod
+    def _rss_mb():
+        """Current process RSS in MB, read from /proc (Linux); None elsewhere."""
+        try:
+            with open("/proc/self/status") as f:
+                for line in f:
+                    if line.startswith("VmRSS:"):
+                        return round(int(line.split()[1]) / 1024, 1)
+        except (OSError, ValueError, IndexError):
+            pass
+        return None
+
     def _transcribe_one(self, audio, duration):
         model = self._get_model()
         t0 = time.monotonic()
+        cpu0 = time.process_time()
         segments, _ = model.transcribe(
             audio,
             language=self.cfg["language"],
             beam_size=self.cfg["beam_size"],
         )
         text = "".join(seg.text for seg in segments).strip()
-        elapsed_ms = (time.monotonic() - t0) * 1000
+        wall = time.monotonic() - t0
+        elapsed_ms = wall * 1000
+        # Process CPU time spent during transcription as % of wall time
+        # (can exceed 100 with multiple threads).
+        cpu_percent = round((time.process_time() - cpu0) / wall * 100, 1) if wall > 0 else None
+        memory_mb = self._rss_mb()
         self._last_used = time.monotonic()
         if not text:
             print("(empty transcription)")
@@ -174,7 +192,8 @@ class App:
             self.feedback.notify("omnihear", text)
         if self.db:
             try:
-                self.db.insert(text, duration, elapsed_ms, self.cfg["model"])
+                self.db.insert(text, duration, elapsed_ms, self.cfg["model"],
+                               cpu_percent=cpu_percent, memory_mb=memory_mb)
             except Exception as e:
                 print(f"History write failed: {e}")
 

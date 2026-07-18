@@ -17,24 +17,48 @@ PAGE = """<!DOCTYPE html>
 <title>omnihear</title>
 <style>
 :root {
-  --surface: #fcfcfb; --card: #ffffff; --border: #e4e3df;
+  --surface: #f5f8fc; --card: #ffffff; --border: #dde5ef;
   --text: #0b0b0b; --text-2: #52514e; --accent: #2a78d6;
+  --accent-soft: #e8f0fa;
 }
 @media (prefers-color-scheme: dark) {
   :root {
     --surface: #1a1a19; --card: #232322; --border: #3a3a38;
     --text: #ffffff; --text-2: #c3c2b7; --accent: #3987e5;
+    --accent-soft: #22334a;
   }
+}
+:root[data-theme="light"] {
+  --surface: #f5f8fc; --card: #ffffff; --border: #dde5ef;
+  --text: #0b0b0b; --text-2: #52514e; --accent: #2a78d6;
+  --accent-soft: #e8f0fa;
+}
+:root[data-theme="dark"] {
+  --surface: #1a1a19; --card: #232322; --border: #3a3a38;
+  --text: #ffffff; --text-2: #c3c2b7; --accent: #3987e5;
+  --accent-soft: #22334a;
 }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--surface); color: var(--text);
   font: 15px/1.5 system-ui, sans-serif; }
-.wrap { max-width: 920px; margin: 0 auto; padding: 24px 16px 48px; }
-h1 { font-size: 20px; margin: 0 0 4px; }
-h2 { font-size: 15px; margin: 28px 0 10px; color: var(--text-2);
-  text-transform: uppercase; letter-spacing: .04em; }
-#status { color: var(--text-2); font-size: 13px; }
-.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px,1fr));
+.wrap { max-width: 960px; margin: 0 auto; padding: 24px 16px 48px; }
+header { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+h1 { font-size: 20px; margin: 0; color: var(--accent); }
+h2 { font-size: 14px; margin: 26px 0 10px; color: var(--text-2);
+  text-transform: uppercase; letter-spacing: .05em; }
+nav { display: flex; gap: 4px; }
+nav a { padding: 6px 14px; border-radius: 6px; text-decoration: none;
+  color: var(--text-2); font-size: 14px; }
+nav a.active { background: var(--accent-soft); color: var(--accent);
+  font-weight: 600; }
+#theme-toggle { margin-left: auto; }
+#status { color: var(--text-2); font-size: 13px; margin-top: 4px; }
+.screen { display: none; }
+.screen.active { display: block; }
+td.num, th.num { text-align: right; white-space: nowrap;
+  font-variant-numeric: tabular-nums; }
+input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px,1fr));
   gap: 10px; }
 .tile { background: var(--card); border: 1px solid var(--border);
   border-radius: 8px; padding: 12px 14px; }
@@ -61,36 +85,73 @@ svg { display: block; width: 100%; height: auto; }
 </head>
 <body>
 <div class="wrap">
-  <h1>omnihear</h1>
+  <header>
+    <h1>omnihear</h1>
+    <nav>
+      <a href="#/" id="nav-history">History</a>
+      <a href="#/settings" id="nav-settings">Settings</a>
+    </nav>
+    <button id="theme-toggle" type="button" title="Toggle light/dark">◐ theme</button>
+  </header>
   <div id="status">loading…</div>
 
-  <h2>Usage</h2>
-  <div class="tiles" id="tiles"></div>
-  <h2>Words per day (last 30 days)</h2>
-  <div class="card"><div id="chart"></div></div>
+  <section class="screen" id="screen-history">
+    <h2>Usage</h2>
+    <div class="tiles" id="tiles"></div>
+    <h2>Words per day (last 30 days)</h2>
+    <div class="card"><div id="chart"></div></div>
 
-  <h2>History</h2>
-  <div class="card">
-    <input id="q" placeholder="Search transcriptions…" style="width:100%;margin-bottom:10px">
-    <table><thead><tr><th>Time</th><th>Text</th><th>Audio</th><th>Latency</th></tr></thead>
-    <tbody id="hist"></tbody></table>
-  </div>
-
-  <h2>Config</h2>
-  <div class="card">
-    <form id="cfg" class="cfg-grid"></form>
-    <div style="margin-top:12px">
-      <button class="primary" id="save">Save config</button>
-      <button id="restart" type="button">Restart service</button>
-      <span id="cfg-msg"></span>
+    <h2>History</h2>
+    <div class="card">
+      <input id="q" placeholder="Search transcriptions…"
+             style="width:100%;margin-bottom:10px">
+      <table><thead><tr><th>Time</th><th>Text</th><th class="num">Audio</th>
+      <th class="num">Latency</th><th class="num">CPU</th><th class="num">Mem</th></tr></thead>
+      <tbody id="hist"></tbody></table>
     </div>
-  </div>
+  </section>
+
+  <section class="screen" id="screen-settings">
+    <h2>Config</h2>
+    <div class="card">
+      <form id="cfg" class="cfg-grid"></form>
+      <div style="margin-top:12px">
+        <button class="primary" id="save">Save config</button>
+        <button id="restart" type="button">Restart service</button>
+        <span id="cfg-msg"></span>
+      </div>
+    </div>
+    <p style="font-size:13px;color:var(--text-2)">Changes are written to
+    <code>~/.config/omnihear/config.toml</code> and take effect after a restart.</p>
+  </section>
 </div>
 <script>
 const $ = s => document.querySelector(s);
 const esc = s => String(s).replace(/[&<>"]/g,
   c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const api = (p, opts) => fetch(p, opts).then(r => r.json());
+
+// --- theme toggle (persisted; default follows prefers-color-scheme) ---
+const savedTheme = localStorage.getItem('omnihear-theme');
+if (savedTheme) document.documentElement.dataset.theme = savedTheme;
+$('#theme-toggle').addEventListener('click', () => {
+  const cur = document.documentElement.dataset.theme ||
+    (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+  const next = cur === 'dark' ? 'light' : 'dark';
+  document.documentElement.dataset.theme = next;
+  localStorage.setItem('omnihear-theme', next);
+});
+
+// --- hash routing: #/ (History, home) and #/settings ---
+function route() {
+  const settings = location.hash === '#/settings';
+  $('#screen-history').classList.toggle('active', !settings);
+  $('#screen-settings').classList.toggle('active', settings);
+  $('#nav-history').classList.toggle('active', !settings);
+  $('#nav-settings').classList.toggle('active', settings);
+}
+window.addEventListener('hashchange', route);
+route();
 
 function fmtSec(s) { return s >= 60 ? (s/60).toFixed(1)+' min' : s.toFixed(1)+' s'; }
 
@@ -109,6 +170,8 @@ async function loadStats() {
     [t.words, 'words'],
     [fmtSec(t.audio_seconds), 'dictated audio'],
     [Math.round(t.avg_transcribe_ms) + ' ms', 'avg latency'],
+    [t.avg_cpu_percent ? t.avg_cpu_percent.toFixed(0) + '%' : '\\u2013', 'avg CPU'],
+    [t.avg_memory_mb ? Math.round(t.avg_memory_mb) + ' MB' : '\\u2013', 'avg memory'],
   ].map(([v,l]) => `<div class="tile"><div class="v">${esc(v)}</div>` +
                    `<div class="l">${esc(l)}</div></div>`).join('');
   drawChart(st.per_day);
@@ -146,9 +209,11 @@ async function loadHistory() {
   $('#hist').innerHTML = rows.map(r =>
     `<tr><td style="white-space:nowrap">${esc(r.ts.replace('T',' '))}</td>` +
     `<td>${esc(r.text)}</td>` +
-    `<td>${r.audio_seconds ? r.audio_seconds.toFixed(1)+'s' : ''}</td>` +
-    `<td>${r.transcribe_ms ? Math.round(r.transcribe_ms)+'ms' : ''}</td></tr>`
-  ).join('') || '<tr><td colspan="4">No transcriptions.</td></tr>';
+    `<td class="num">${r.audio_seconds ? r.audio_seconds.toFixed(1)+'s' : ''}</td>` +
+    `<td class="num">${r.transcribe_ms ? Math.round(r.transcribe_ms)+'ms' : ''}</td>` +
+    `<td class="num">${r.cpu_percent != null ? r.cpu_percent.toFixed(0)+'%' : '\\u2013'}</td>` +
+    `<td class="num">${r.memory_mb != null ? Math.round(r.memory_mb)+' MB' : '\\u2013'}</td></tr>`
+  ).join('') || '<tr><td colspan="6">No transcriptions.</td></tr>';
 }
 
 async function loadConfig() {
@@ -215,7 +280,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
         url = urlparse(self.path)
         qs = parse_qs(url.query)
         db = self.server.db
-        if url.path == "/":
+        if url.path in ("/", "/settings"):
             self._send(200, PAGE.encode(), "text/html; charset=utf-8")
         elif url.path == "/api/history":
             if db is None:
@@ -235,7 +300,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
             if db is None:
                 self._send(200, {"totals": {"n": 0, "words": 0,
                                             "audio_seconds": 0,
-                                            "avg_transcribe_ms": 0},
+                                            "avg_transcribe_ms": 0,
+                                            "avg_cpu_percent": 0,
+                                            "avg_memory_mb": 0},
                                  "per_day": []})
             else:
                 self._send(200, db.stats())

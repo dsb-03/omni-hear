@@ -29,11 +29,14 @@ omnihear --help                            # full CLI options
 ## Web dashboard
 
 While omnihear runs, a local-only dashboard is served at
-`http://127.0.0.1:4738` (change with `dashboard_port`, disable with
-`--no-dashboard`). It shows searchable transcription history, usage stats
-with a words-per-day chart, and lets you edit the config file from the
+`http://127.0.0.1:4738` — enabled by default (change the port with
+`dashboard_port`, opt out with `--no-dashboard` or `dashboard = false`).
+The History screen (home) shows usage stats — including per-transcription
+CPU and memory averages — a words-per-day chart, and a searchable
+transcription table; the Settings screen edits the config file from the
 browser (changes take effect after restarting omnihear; the Restart button
-works when running under systemd).
+works when running under systemd). A light/dark theme toggle is provided
+and follows your system theme by default.
 
 ## Configuration
 

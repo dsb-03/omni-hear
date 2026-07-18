@@ -12,7 +12,9 @@ CREATE TABLE IF NOT EXISTS transcriptions (
     text TEXT NOT NULL,
     audio_seconds REAL,
     transcribe_ms REAL,
-    model TEXT
+    model TEXT,
+    cpu_percent REAL,
+    memory_mb REAL
 );
 """
 
@@ -32,18 +34,30 @@ class HistoryDB:
         with self._lock:
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.execute(SCHEMA)
+            self._migrate()
             self._conn.commit()
+
+    def _migrate(self):
+        cols = {r["name"] for r in
+                self._conn.execute("PRAGMA table_info(transcriptions)")}
+        for col in ("cpu_percent", "memory_mb"):
+            if col not in cols:
+                self._conn.execute(
+                    f"ALTER TABLE transcriptions ADD COLUMN {col} REAL")
 
     def close(self):
         with self._lock:
             self._conn.close()
 
-    def insert(self, text: str, audio_seconds: float, transcribe_ms: float, model: str):
+    def insert(self, text: str, audio_seconds: float, transcribe_ms: float,
+               model: str, cpu_percent: float | None = None,
+               memory_mb: float | None = None):
         with self._lock:
             self._conn.execute(
-                "INSERT INTO transcriptions (text, audio_seconds, transcribe_ms, model)"
-                " VALUES (?, ?, ?, ?)",
-                (text, audio_seconds, transcribe_ms, model),
+                "INSERT INTO transcriptions"
+                " (text, audio_seconds, transcribe_ms, model, cpu_percent, memory_mb)"
+                " VALUES (?, ?, ?, ?, ?, ?)",
+                (text, audio_seconds, transcribe_ms, model, cpu_percent, memory_mb),
             )
             self._conn.commit()
 
@@ -67,6 +81,8 @@ class HistoryDB:
                 "SELECT COUNT(*) AS n,"
                 " COALESCE(SUM(audio_seconds), 0) AS audio_seconds,"
                 " COALESCE(AVG(transcribe_ms), 0) AS avg_transcribe_ms,"
+                " COALESCE(AVG(cpu_percent), 0) AS avg_cpu_percent,"
+                " COALESCE(AVG(memory_mb), 0) AS avg_memory_mb,"
                 " COALESCE(SUM(LENGTH(text) - LENGTH(REPLACE(text, ' ', '')) + 1), 0)"
                 "   AS words"
                 " FROM transcriptions"
