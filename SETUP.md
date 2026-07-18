@@ -29,16 +29,16 @@ git push
 
 Repo Settings → Pages → Source: **Deploy from a branch** → Branch: `main`, folder: `/docs`.
 
-Your repo will be served at `https://<username>.github.io/<repo>/`.
+Your repo will be served at `https://dsb-03.github.io/omni-hear/`.
 
 ## 4. Client machine setup (do this once per machine)
 
 ```bash
 # Add your public signing key
-curl -fsSL https://<username>.github.io/<repo>/pubkey.gpg | sudo gpg --dearmor -o /usr/share/keyrings/omnihear.gpg
+curl -fsSL https://dsb-03.github.io/omni-hear/pubkey.gpg | sudo gpg --dearmor -o /usr/share/keyrings/omnihear.gpg
 
 # Add the repo source
-echo "deb [signed-by=/usr/share/keyrings/omnihear.gpg] https://<username>.github.io/<repo>/ stable main" \
+echo "deb [signed-by=/usr/share/keyrings/omnihear.gpg] https://dsb-03.github.io/omni-hear/ stable main" \
   | sudo tee /etc/apt/sources.list.d/omnihear.list
 
 sudo apt update
@@ -76,6 +76,6 @@ holding signing capability. For a single-user/small-scale setup, doing releases 
 
 ## Editing the app for a new version
 
-1. Edit files under `src/` (`whisper_ptt.py`, `requirements.txt`, etc.)
+1. Edit files under `src/` (`omnihear.py`, `requirements.txt`, etc.)
 2. Bump the version and build: `./build-deb.sh 1.2.0`
 3. Publish via step 2 (manual) or by tagging a release (step 5, automated)

@@ -10,8 +10,8 @@ has keyboard focus.
 ## Install
 
 ```bash
-curl -fsSL https://<username>.github.io/omnihear/pubkey.gpg | sudo gpg --dearmor -o /usr/share/keyrings/omnihear.gpg
-echo "deb [signed-by=/usr/share/keyrings/omnihear.gpg] https://<username>.github.io/omnihear/ stable main" \
+curl -fsSL https://dsb-03.github.io/omni-hear/pubkey.gpg | sudo gpg --dearmor -o /usr/share/keyrings/omnihear.gpg
+echo "deb [signed-by=/usr/share/keyrings/omnihear.gpg] https://dsb-03.github.io/omni-hear/ stable main" \
   | sudo tee /etc/apt/sources.list.d/omnihear.list
 sudo apt update
 sudo apt install omnihear
