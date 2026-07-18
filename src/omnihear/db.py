@@ -14,7 +14,10 @@ CREATE TABLE IF NOT EXISTS transcriptions (
     transcribe_ms REAL,
     model TEXT,
     cpu_percent REAL,
-    memory_mb REAL
+    memory_mb REAL,
+    avg_logprob REAL,
+    no_speech_prob REAL,
+    compression_ratio REAL
 );
 """
 
@@ -40,7 +43,8 @@ class HistoryDB:
     def _migrate(self):
         cols = {r["name"] for r in
                 self._conn.execute("PRAGMA table_info(transcriptions)")}
-        for col in ("cpu_percent", "memory_mb"):
+        for col in ("cpu_percent", "memory_mb", "avg_logprob", "no_speech_prob",
+                    "compression_ratio"):
             if col not in cols:
                 self._conn.execute(
                     f"ALTER TABLE transcriptions ADD COLUMN {col} REAL")
@@ -51,13 +55,17 @@ class HistoryDB:
 
     def insert(self, text: str, audio_seconds: float, transcribe_ms: float,
                model: str, cpu_percent: float | None = None,
-               memory_mb: float | None = None):
+               memory_mb: float | None = None, avg_logprob: float | None = None,
+               no_speech_prob: float | None = None,
+               compression_ratio: float | None = None):
         with self._lock:
             self._conn.execute(
                 "INSERT INTO transcriptions"
-                " (text, audio_seconds, transcribe_ms, model, cpu_percent, memory_mb)"
-                " VALUES (?, ?, ?, ?, ?, ?)",
-                (text, audio_seconds, transcribe_ms, model, cpu_percent, memory_mb),
+                " (text, audio_seconds, transcribe_ms, model, cpu_percent, memory_mb,"
+                "  avg_logprob, no_speech_prob, compression_ratio)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (text, audio_seconds, transcribe_ms, model, cpu_percent, memory_mb,
+                 avg_logprob, no_speech_prob, compression_ratio),
             )
             self._conn.commit()
 

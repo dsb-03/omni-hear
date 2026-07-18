@@ -412,6 +412,7 @@ td.num {
   font-weight: 600;
   text-transform: capitalize;
 }
+.cfg-grid label[title] { cursor: help; }
 .cfg-grid label select,
 .cfg-grid label input:not([type=checkbox]) {
   margin-top: 6px;
@@ -939,6 +940,10 @@ async function openLog(offset, q, total) {
     ['Transcribe Latency', r.transcribe_ms ? Math.round(r.transcribe_ms) + ' ms' : '–'],
     ['CPU Usage', r.cpu_percent != null ? r.cpu_percent.toFixed(1) + '%' : '–'],
     ['Memory Usage', r.memory_mb != null ? Math.round(r.memory_mb) + ' MB' : '–'],
+    ['Model', r.model || '–'],
+    ['Avg Log Probability', r.avg_logprob != null ? r.avg_logprob.toFixed(3) : '–'],
+    ['No-Speech Probability', r.no_speech_prob != null ? r.no_speech_prob.toFixed(3) : '–'],
+    ['Compression Ratio', r.compression_ratio != null ? r.compression_ratio.toFixed(3) : '–'],
   ];
   card.innerHTML = fields.map(([lbl, val], idx) =>
     `<div class="log-field">` +
@@ -962,32 +967,63 @@ const LANGUAGE_NAMES = __LANGS__;
 const LANGUAGES = [['auto','Auto-detect Language']].concat(
   Object.entries(LANGUAGE_NAMES).map(([c,n]) => [c, `${n} (${c})`]));
 const COMPUTE_TYPES = ['int8','float16','int8_float16','float32'];
-const BOOLS = ['dashboard','notify','beep','history','verbose'];
+const BOOLS = ['dashboard','notify','beep','history','verbose','vad_filter',
+  'condition_on_previous_text'];
 const NUMBERS = {
   sample_rate: {min: 8000, step: 1000},
   beam_size: {min: 1, step: 1},
   min_duration: {min: 0, step: 0.1},
   dashboard_port: {min: 1, max: 65535, step: 1},
   idle_unload_minutes: {min: 0, step: 1},
+  no_speech_threshold: {min: 0, max: 1, step: 0.05},
+  log_prob_threshold: {min: -5, max: 0, step: 0.1},
+  compression_ratio_threshold: {min: 1, max: 10, step: 0.1},
 };
 const SECTIONS = [
   ['Transcription Engine', ['model','language','device','compute_type','beam_size']],
   ['Input & Trigger', ['hotkey','sample_rate','min_duration','type_method']],
+  ['Hallucination Filtering', ['vad_filter','no_speech_threshold',
+    'log_prob_threshold','compression_ratio_threshold','condition_on_previous_text']],
   ['Dashboard & SQLite DB', ['dashboard','dashboard_port','history']],
   ['Optional Feedback Behaviors', ['notify','beep','idle_unload_minutes','verbose']],
 ];
 
+const HELP = {
+  model: 'faster-whisper model to load. Bigger = more accurate but slower and more memory.',
+  language: 'Language spoken in the audio. Auto-detect adds latency; pick a fixed language if you know it.',
+  device: 'Run inference on CPU or an NVIDIA GPU (cuda).',
+  compute_type: 'Numeric precision for inference. int8 is fastest/smallest; float32 is most accurate.',
+  beam_size: 'Search width for decoding. 1 = greedy (fastest); higher can improve accuracy at the cost of speed.',
+  hotkey: 'Key (or +-combo) to hold down to record. Release to transcribe and type.',
+  sample_rate: 'Microphone recording sample rate in Hz.',
+  min_duration: 'Ignore recordings shorter than this many seconds (avoids accidental taps).',
+  type_method: 'How transcribed text is typed into the focused field.',
+  vad_filter: 'Trim silence/noise before transcription using Silero VAD. Reduces hallucinated text on quiet clips.',
+  no_speech_threshold: 'Segments with a no-speech probability above this are treated as silence, not text.',
+  log_prob_threshold: 'Segments whose average log-probability falls below this are considered low-confidence.',
+  compression_ratio_threshold: 'Segments with a compression ratio above this look repetitive/looping and are flagged as likely hallucinations.',
+  condition_on_previous_text: "Feed each segment's decoded text as context for the next. Can help long audio but often causes repeated-phrase hallucinations on short push-to-talk clips.",
+  dashboard: 'Enable the local web dashboard (this page) at 127.0.0.1.',
+  dashboard_port: 'Port the local dashboard listens on.',
+  history: 'Save each transcription to the local SQLite history database.',
+  notify: 'Show a desktop notification with the transcribed text.',
+  beep: 'Play a short sound on transcription.',
+  idle_unload_minutes: 'Unload the model from memory after this many minutes of inactivity (0 = never).',
+  verbose: 'Print per-transcription logs to the terminal.',
+};
 const pretty = k => k.replace(/_/g, ' ');
 const keyDisplay = hk => String(hk).split('+').filter(Boolean)
   .map(p => KEY_NAMES[p] || p.toUpperCase()).join(' + ');
 
-const selectOf = (k, opts, v) => `<label>${pretty(k)}<select name="${k}">` +
+const titleAttr = k => HELP[k] ? ` title="${esc(HELP[k])}"` : '';
+
+const selectOf = (k, opts, v) => `<label${titleAttr(k)}>${pretty(k)}<select name="${k}">` +
   opts.map(o => `<option value="${esc(o)}"${o===v?' selected':''}>${esc(o)}</option>`)
       .join('') + `</select></label>`;
 
 function customSelect(k, opts, v, placeholder) {
   const known = opts.some(o => o[0] === v);
-  return `<label>${pretty(k)}<select name="${k}" id="${k}-sel" data-custom="1">` +
+  return `<label${titleAttr(k)}>${pretty(k)}<select name="${k}" id="${k}-sel" data-custom="1">` +
     opts.map(([val, lab]) =>
       `<option value="${esc(val)}"${val===v?' selected':''}>${esc(lab)}</option>`).join('') +
     `<option value="__custom__"${known?'':' selected'}>custom\u2026</option>` +
@@ -998,7 +1034,7 @@ function customSelect(k, opts, v, placeholder) {
 
 function fieldHtml(k, v) {
   if (BOOLS.includes(k))
-    return `<label class="check"><input type="checkbox" name="${k}"${v?' checked':''}>` +
+    return `<label class="check"${titleAttr(k)}><input type="checkbox" name="${k}"${v?' checked':''}>` +
            `<span>${pretty(k)}</span><div class="switch-slider"></div></label>`;
   if (k === 'device') return selectOf(k, ['cpu','cuda'], v);
   if (k === 'type_method') return selectOf(k, ['pynput','xdotool'], v);
@@ -1008,20 +1044,20 @@ function fieldHtml(k, v) {
       MODELS.map(m => [m, m === 'base.en' ? 'base.en (default)' : m]),
       v, 'model name or HF repo id');
   if (k === 'language')
-    return `<label>${pretty(k)}<select name="language">` +
+    return `<label${titleAttr(k)}>${pretty(k)}<select name="language">` +
       LANGUAGES.map(([c, lab]) =>
         `<option value="${c}"${c===v?' selected':''}>${esc(lab)}</option>`).join('') +
       `</select></label>`;
   if (k === 'hotkey')
-    return `<label>hotkey (push to talk)` +
+    return `<label${titleAttr(k)}>hotkey (push to talk)` +
       `<button type="button" id="hotkey-capture" data-value="${esc(v)}">` +
       `${esc(keyDisplay(v))}</button></label>`;
   if (k in NUMBERS) {
     const n = NUMBERS[k];
-    return `<label>${pretty(k)}<input type="number" name="${k}" value="${esc(v)}"` +
+    return `<label${titleAttr(k)}>${pretty(k)}<input type="number" name="${k}" value="${esc(v)}"` +
       ` min="${n.min}"${n.max?` max="${n.max}"`:''} step="${n.step}"></label>`;
   }
-  return `<label>${pretty(k)}<input name="${k}" value="${esc(v)}"></label>`;
+  return `<label${titleAttr(k)}>${pretty(k)}<input name="${k}" value="${esc(v)}"></label>`;
 }
 
 // --- Keyboard Hotkey Capturer ---

@@ -318,8 +318,23 @@ class App:
             audio,
             language=language,
             beam_size=self.cfg["beam_size"],
+            vad_filter=self.cfg["vad_filter"],
+            no_speech_threshold=self.cfg["no_speech_threshold"],
+            log_prob_threshold=self.cfg["log_prob_threshold"],
+            compression_ratio_threshold=self.cfg["compression_ratio_threshold"],
+            condition_on_previous_text=self.cfg["condition_on_previous_text"],
         )
+        segments = list(segments)
         text = "".join(seg.text for seg in segments).strip()
+        avg_logprob = no_speech_prob = compression_ratio = None
+        if segments:
+            n = len(segments)
+            avg_logprob = sum(s.avg_logprob for s in segments) / n
+            no_speech_prob = sum(s.no_speech_prob for s in segments) / n
+            compression_ratio = sum(s.compression_ratio for s in segments) / n
+            self._log(f"avg_logprob={avg_logprob:.3f} "
+                      f"no_speech_prob={no_speech_prob:.3f} "
+                      f"compression_ratio={compression_ratio:.3f}")
         wall = time.monotonic() - t0
         elapsed_ms = wall * 1000
         # Process CPU time spent during transcription as % of wall time
@@ -337,7 +352,9 @@ class App:
         if self.db:
             try:
                 self.db.insert(text, duration, elapsed_ms, self.cfg["model"],
-                               cpu_percent=cpu_percent, memory_mb=memory_mb)
+                               cpu_percent=cpu_percent, memory_mb=memory_mb,
+                               avg_logprob=avg_logprob, no_speech_prob=no_speech_prob,
+                               compression_ratio=compression_ratio)
             except Exception as e:
                 print(f"History write failed: {e}")
 
