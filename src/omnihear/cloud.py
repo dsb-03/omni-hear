@@ -17,10 +17,14 @@ from datetime import date, datetime
 
 from . import config as config_mod
 
-# ponytail: placeholders — set to the real project URL + anon (public) key.
 # The anon key is safe to embed; RLS enforces access. Never the service_role key.
-SUPABASE_URL = os.environ.get("OMNIHEAR_SUPABASE_URL", "")
-SUPABASE_ANON_KEY = os.environ.get("OMNIHEAR_SUPABASE_ANON_KEY", "")
+SUPABASE_URL = os.environ.get(
+    "OMNIHEAR_SUPABASE_URL", "https://cudtvncpyceefopgtwqb.supabase.co")
+SUPABASE_ANON_KEY = os.environ.get(
+    "OMNIHEAR_SUPABASE_ANON_KEY",
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN1"
+    "ZHR2bmNweWNlZWZvcGd0d3FiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ0NTU0NzQsImV4"
+    "cCI6MjEwMDAzMTQ3NH0.sFJb5pL5gar0mJqPuteKOBhUDgnXPFQQt0aS1eXRWzg")
 
 TIMEOUT = 5
 _lock = threading.Lock()
