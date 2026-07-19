@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Push-to-talk local Whisper transcription. Hold a hotkey (or combo) → mic records → release → faster-whisper transcribes locally → text is typed into the focused field. Cross-platform: Linux (X11), Windows, and macOS (Apple Silicon). Distributed as a Linux `.deb` (self-hosted, GPG-signed APT repo served from GitHub Pages out of `docs/`), a Windows installer (`.exe`), and a macOS `.dmg` / Homebrew Cask.
+Push-to-talk local Whisper transcription for Linux (X11) and Windows. Hold a hotkey (or combo) → mic records → release → faster-whisper transcribes locally → text is typed into the focused field. Linux: distributed as a .deb through a self-hosted, GPG-signed APT repo served from GitHub Pages out of `docs/`. Windows: PyInstaller + Inno Setup installer attached to GitHub Releases.
 
 ## Commands
 
@@ -50,6 +50,8 @@ Single process, `src/omnihear/`:
 Terminal output is quiet by default; per-transcription logs only under `--verbose` (`_log()` in app.py). The dashboard is the primary log.
 
 ## Packaging
+
+### Linux (.deb)
 
 **Linux (`.deb`):** `build-deb.sh <version>` assembles `omnihear_<v>_amd64/` from `DEBIAN-template/` (version substituted into control), `src/omnihear/` → `/opt/omnihear/`, wrapper → `/usr/bin/omnihear`, `systemd/omnihear.service` → `/usr/lib/systemd/user/`. The .deb does **not** vendor Python deps: `postinst` creates a venv in `/opt/omnihear` and pip-installs `requirements.txt` at install time (internet required). `Depends: python3 (>= 3.11)` because of `tomllib`. Committed `omnihear_<v>_amd64/` trees are build artifacts of past releases.
 
