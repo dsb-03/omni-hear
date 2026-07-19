@@ -145,10 +145,14 @@ class App:
         self._verbose = bool(cfg.get("verbose"))
         self._overlay = None
         self._listener = None
-        try:
-            self._overlay = RecordingOverlay()
-        except Exception as e:
-            print(f"omnihear: warning: overlay could not start: {e}")
+        # The Tk overlay runs on a background thread, which macOS Cocoa
+        # forbids (GUI must own the main thread, which the menu-bar tray
+        # takes). Skip it there; the beep + notification cover feedback.
+        if sys.platform != "darwin":
+            try:
+                self._overlay = RecordingOverlay()
+            except Exception as e:
+                print(f"omnihear: warning: overlay could not start: {e}")
 
     def _log(self, msg):
         """Per-transcription chatter; printed only with --verbose."""
@@ -271,7 +275,17 @@ class App:
 
     @staticmethod
     def _rss_mb():
-        """Current process RSS in MB, read from /proc (Linux); None elsewhere."""
+        """Current process RSS in MB. /proc on Linux, getrusage on macOS,
+        None where neither is available (e.g. Windows)."""
+        if sys.platform == "darwin":
+            try:
+                import resource
+                # ru_maxrss is bytes on macOS (KiB on Linux) — peak, not live,
+                # but close enough for the dashboard's memory column.
+                return round(
+                    resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / (1024 * 1024), 1)
+            except (ImportError, ValueError):
+                return None
         try:
             with open("/proc/self/status") as f:
                 for line in f:

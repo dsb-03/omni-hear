@@ -1,0 +1,8 @@
+faster-whisper
+sounddevice
+numpy
+pynput
+pystray
+pillow
+pyobjc-framework-Cocoa
+pyobjc-framework-Quartz

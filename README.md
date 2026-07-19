@@ -1,6 +1,6 @@
 # omnihear
 
-Push-to-talk local Whisper transcription for X11 desktops.
+Push-to-talk local Whisper transcription for Linux (X11), Windows, and macOS.
 
 Hold a hotkey, speak, release — your speech is transcribed locally with
 [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (no cloud, no
@@ -122,9 +122,47 @@ system tray icon (no terminal window) with "Open Dashboard" and "Quit"
 menu items; the dashboard's Restart button relaunches the process directly
 (no systemd equivalent needed on Windows).
 
+## macOS
+
+Apple Silicon (arm64) only. Install one of two ways:
+
+```bash
+# Homebrew (requires the tap to be set up once — see below)
+brew install --cask <your-user>/omnihear/omnihear
+
+# or download omnihear-<version>-arm64.dmg from the Releases page,
+# open it, and drag Omnihear to Applications.
+```
+
+**First launch (unsigned builds):** until the build is notarized, Gatekeeper
+blocks it. Either right-click the app → **Open** (then confirm once), or run:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/omnihear.app
+```
+
+**Permissions** — grant these in **System Settings → Privacy & Security**
+(macOS will prompt on first use):
+
+- **Microphone** — to record audio.
+- **Accessibility** — to type transcribed text into the focused field.
+- **Input Monitoring** — to receive the global push-to-talk hotkey.
+
+Omnihear runs as a menu-bar app (no Dock icon or terminal window) with
+**Open Dashboard** and **Quit** items. The first hotkey press downloads the
+selected Whisper model, so it takes a few extra seconds. Mac users can use ⌘
+in hotkeys (e.g. `cmd_r`). Config lives at
+`~/Library/Application Support/omnihear/config.toml`, history at
+`~/Library/Application Support/omnihear/history.db`.
+
+> Note: unsigned/ad-hoc-signed builds may re-prompt for Accessibility/Input
+> Monitoring after each app update. Developer-ID signing (see SETUP.md) makes
+> the grants stick.
+
 ## Requirements
 
-- X11 session (Wayland not currently supported — global hotkeys and
-  synthetic keystroke injection work differently there); Windows is
-  supported via the installer above
+- **Linux:** X11 session (Wayland not currently supported — global hotkeys and
+  synthetic keystroke injection work differently there)
+- **Windows:** via the installer above
+- **macOS:** Apple Silicon (arm64), macOS 11+
 - A microphone

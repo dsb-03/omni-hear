@@ -1067,6 +1067,7 @@ const CODE_MAP = {
   ControlRight:'ctrl_r', ControlLeft:'ctrl_l', AltLeft:'alt_l', AltRight:'alt_r',
   ShiftLeft:'shift_l', ShiftRight:'shift_r', Space:'space', CapsLock:'caps_lock',
   Pause:'pause', ScrollLock:'scroll_lock',
+  MetaLeft:'cmd_l', MetaRight:'cmd_r',
 };
 for (let i = 1; i <= 12; i++) CODE_MAP['F'+i] = 'f'+i;
 function codeToName(code) {
@@ -1224,8 +1225,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     .replace("__LANGS__",
                              json.dumps(config_mod.LANGUAGE_NAMES))
                     .replace("__TYPE_METHODS__",
-                             json.dumps(["pynput"] if sys.platform == "win32"
-                                         else ["pynput", "xdotool"])))
+                             json.dumps(["pynput"]
+                                        if sys.platform in ("win32", "darwin")
+                                        else ["pynput", "xdotool"])))
             self._send(200, page.encode(), "text/html; charset=utf-8")
         elif url.path == "/api/history":
             if db is None:
@@ -1279,7 +1281,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._send(200, {"saved": sorted(clean), "errors": errors,
                              "message": msg})
         elif url.path == "/api/restart":
-            if sys.platform == "win32":
+            if sys.platform in ("win32", "darwin"):
                 # Frozen (PyInstaller) argv[0] is the exe itself; drop it so
                 # the relaunch doesn't get its own path as a positional arg.
                 threading.Timer(0.5, lambda: os.execv(

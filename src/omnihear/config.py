@@ -14,6 +14,7 @@ from pathlib import Path
 # these to pynput Key objects, the dashboard uses them for key capture).
 SPECIAL_KEY_NAMES = [
     "ctrl_r", "ctrl_l", "alt_r", "alt_l", "shift_r", "shift_l",
+    "cmd_r", "cmd_l",
     "caps_lock", "space", "pause", "scroll_lock",
     "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12",
 ]
@@ -24,6 +25,7 @@ KEY_DISPLAY_NAMES = {
     "ctrl_r": "Ctrl Right", "ctrl_l": "Ctrl Left",
     "alt_r": "Alt Right", "alt_l": "Alt Left",
     "shift_r": "Shift Right", "shift_l": "Shift Left",
+    "cmd_r": "Cmd Right", "cmd_l": "Cmd Left",
     "caps_lock": "Caps Lock", "space": "Space",
     "pause": "Pause", "scroll_lock": "Scroll Lock",
     **{f"f{i}": f"F{i}" for i in range(1, 13)},
@@ -126,6 +128,8 @@ KEY_TYPES = {k: type(v) for k, v in DEFAULTS.items()}
 def config_path() -> Path:
     if sys.platform == "win32":
         base = os.environ.get("APPDATA") or os.path.expanduser("~")
+    elif sys.platform == "darwin":
+        base = os.path.expanduser("~/Library/Application Support")
     else:
         base = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
     return Path(base) / "omnihear" / "config.toml"
@@ -215,8 +219,9 @@ def validate_updates(updates: dict) -> tuple[dict, list[str]]:
     if "type_method" in clean and clean["type_method"] not in ("pynput", "xdotool"):
         errors.append("type_method must be pynput or xdotool")
         del clean["type_method"]
-    if "type_method" in clean and clean["type_method"] == "xdotool" and sys.platform == "win32":
-        errors.append("type_method 'xdotool' is not supported on Windows")
+    if ("type_method" in clean and clean["type_method"] == "xdotool"
+            and sys.platform in ("win32", "darwin")):
+        errors.append("type_method 'xdotool' is only supported on X11 (Linux)")
         del clean["type_method"]
     if "language" in clean:
         lang = clean["language"].strip().lower()
