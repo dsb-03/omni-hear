@@ -106,7 +106,12 @@ def main():
 
     if cfg["dashboard"]:
         from .dashboard import start_dashboard
-        start_dashboard(db, app.status, port=cfg["dashboard_port"])
+        if start_dashboard(db, app.status, port=cfg["dashboard_port"]) is None:
+            # Port already bound: almost certainly another omnihear instance.
+            # Two instances both hear the hotkey and both type, interleaving
+            # their output — exit instead.
+            sys.exit(f"Port {cfg['dashboard_port']} is already in use — "
+                     "is omnihear already running?")
 
     if sys.platform == "win32":
         from .tray import start_tray
