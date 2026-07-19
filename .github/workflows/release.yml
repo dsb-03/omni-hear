@@ -25,13 +25,17 @@ jobs:
       - name: Build .deb
         run: ./build-deb.sh "${{ steps.version.outputs.version }}"
 
+      # Beta/prerelease tags (anything with a '-', e.g. v1.4.0-beta.1) skip the
+      # stable APT channel — the .deb is only attached to the GitHub prerelease.
       - name: Import GPG signing key
+        if: ${{ !contains(github.ref_name, '-') }}
         run: |
           echo "${{ secrets.GPG_PRIVATE_KEY }}" | base64 -d | gpg --batch --import
         env:
           GNUPGHOME: /home/runner/.gnupg
 
       - name: Update signed APT repo
+        if: ${{ !contains(github.ref_name, '-') }}
         env:
           GNUPGHOME: /home/runner/.gnupg
           GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
@@ -44,6 +48,7 @@ jobs:
           ./scripts/update-apt-repo.sh "omnihear_${{ steps.version.outputs.version }}_amd64.deb"
 
       - name: Commit and push updated repo
+        if: ${{ !contains(github.ref_name, '-') }}
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@users.noreply.github.com"
@@ -55,6 +60,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: omnihear_${{ steps.version.outputs.version }}_amd64.deb
+          prerelease: ${{ contains(github.ref_name, '-') }}
 
       - name: Clean up signing key
         if: always()
@@ -89,6 +95,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: dist-installer/omnihear-setup-${{ steps.version.outputs.version }}.exe
+          prerelease: ${{ contains(github.ref_name, '-') }}
 
   build-macos:
     runs-on: macos-14   # Apple Silicon runner -> arm64
@@ -137,8 +144,10 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: omnihear-${{ steps.version.outputs.version }}-arm64.dmg
+          prerelease: ${{ contains(github.ref_name, '-') }}
 
       - name: Update Homebrew Cask tap (skipped without tap token)
+        if: ${{ !contains(github.ref_name, '-') }}
         env:
           GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           VERSION: ${{ steps.version.outputs.version }}
