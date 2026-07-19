@@ -22,6 +22,7 @@ for pkg in ("faster_whisper", "ctranslate2"):
     datas += d
     binaries += b
     hiddenimports += h
+hiddenimports += ["metaphone"]  # lazy-imported in brain.py, invisible to PyInstaller
 
 # Tray menu-bar icon, loaded from sys._MEIPASS at runtime (see tray.py).
 here = os.path.abspath(os.path.join(SPECPATH))

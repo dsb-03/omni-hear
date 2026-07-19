@@ -59,6 +59,13 @@ def build_parser(cfg: dict) -> argparse.ArgumentParser:
                    default=cfg["idle_unload_minutes"],
                    help="Unload the model after this many idle minutes "
                         "(0 = never unload).")
+    p.add_argument("--no-brain", dest="brain", action="store_false",
+                   default=cfg["brain"],
+                   help="Disable the Common Brain learning engine (beta).")
+    p.add_argument("--analytics", dest="analytics", action="store_true",
+                   default=cfg["analytics"],
+                   help="Opt in to anonymous usage pings (version/platform "
+                        "only, never transcript or audio content).")
     p.add_argument("--verbose", dest="verbose", action="store_true",
                    default=cfg["verbose"],
                    help="Print per-transcription output to the terminal "
@@ -69,8 +76,10 @@ def build_parser(cfg: dict) -> argparse.ArgumentParser:
     return p
 
 
-def effective_config(args) -> dict:
-    cfg = dict(config_mod.DEFAULTS)
+def effective_config(args, file_cfg: dict | None = None) -> dict:
+    # Seed from the config file so keys without CLI flags keep their
+    # file-configured values instead of resetting to DEFAULTS.
+    cfg = dict(file_cfg or config_mod.DEFAULTS)
     for key in cfg:
         val = getattr(args, key, None)
         if val is None:
@@ -82,7 +91,7 @@ def effective_config(args) -> dict:
 def main():
     file_cfg = config_mod.load_config()
     args = build_parser(file_cfg).parse_args()
-    cfg = effective_config(args)
+    cfg = effective_config(args, file_cfg)
 
     if args.write_config:
         path = config_mod.save_config(cfg)
@@ -101,12 +110,23 @@ def main():
         from .db import HistoryDB
         db = HistoryDB()
 
+    brain = None
+    if db is not None and cfg["brain"]:
+        from .brain import Brain
+        brain = Brain(db, min_count=cfg["brain_min_count"])
+
     feedback = Feedback(notify_enabled=cfg["notify"], beep_enabled=cfg["beep"])
-    app = App(cfg, db=db, feedback=feedback)
+    app = App(cfg, db=db, feedback=feedback, brain=brain)
+
+    # Opt-in daily usage ping (no-op unless analytics on + signed in).
+    import threading as _threading
+    from . import cloud
+    _threading.Thread(target=cloud.daily_ping, args=(cfg,), daemon=True).start()
 
     if cfg["dashboard"]:
         from .dashboard import start_dashboard
-        if start_dashboard(db, app.status, port=cfg["dashboard_port"]) is None:
+        if start_dashboard(db, app.status, port=cfg["dashboard_port"],
+                           brain=brain) is None:
             # Port already bound: almost certainly another omnihear instance.
             # Two instances both hear the hotkey and both type, interleaving
             # their output — exit instead.

@@ -20,6 +20,24 @@ CREATE TABLE IF NOT EXISTS transcriptions (
     no_speech_prob REAL,
     compression_ratio REAL
 );
+CREATE TABLE IF NOT EXISTS corrections (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    original TEXT NOT NULL,
+    corrected TEXT NOT NULL,
+    metaphone TEXT,
+    count INTEGER NOT NULL DEFAULT 1,
+    last_ts TEXT,
+    transcription_id INTEGER,
+    embedding BLOB,
+    UNIQUE(original, corrected)
+);
+CREATE TABLE IF NOT EXISTS vocab (
+    word TEXT PRIMARY KEY,
+    metaphone TEXT,
+    count INTEGER NOT NULL DEFAULT 1,
+    manual INTEGER NOT NULL DEFAULT 0,
+    last_ts TEXT
+);
 """
 
 
@@ -42,7 +60,7 @@ class HistoryDB:
         self._conn.row_factory = sqlite3.Row
         with self._lock:
             self._conn.execute("PRAGMA journal_mode=WAL")
-            self._conn.execute(SCHEMA)
+            self._conn.executescript(SCHEMA)
             self._migrate()
             self._conn.commit()
 
@@ -54,6 +72,9 @@ class HistoryDB:
             if col not in cols:
                 self._conn.execute(
                     f"ALTER TABLE transcriptions ADD COLUMN {col} REAL")
+        if "corrected_text" not in cols:
+            self._conn.execute(
+                "ALTER TABLE transcriptions ADD COLUMN corrected_text TEXT")
 
     def close(self):
         with self._lock:
@@ -65,7 +86,7 @@ class HistoryDB:
                no_speech_prob: float | None = None,
                compression_ratio: float | None = None):
         with self._lock:
-            self._conn.execute(
+            cur = self._conn.execute(
                 "INSERT INTO transcriptions"
                 " (text, audio_seconds, transcribe_ms, model, cpu_percent, memory_mb,"
                 "  avg_logprob, no_speech_prob, compression_ratio)"
@@ -74,6 +95,21 @@ class HistoryDB:
                  avg_logprob, no_speech_prob, compression_ratio),
             )
             self._conn.commit()
+            return cur.lastrowid
+
+    def set_corrected(self, row_id: int, text: str):
+        with self._lock:
+            self._conn.execute(
+                "UPDATE transcriptions SET corrected_text = ? WHERE id = ?",
+                (text, row_id))
+            self._conn.commit()
+
+    def get(self, row_id: int) -> dict | None:
+        with self._lock:
+            r = self._conn.execute(
+                "SELECT * FROM transcriptions WHERE id = ?",
+                (row_id,)).fetchone()
+        return dict(r) if r else None
 
     def search(self, q: str = "", limit: int = 50, offset: int = 0) -> list[dict]:
         limit = max(1, min(int(limit), 500))
