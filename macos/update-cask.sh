@@ -34,7 +34,8 @@ cask "omnihear" do
   homepage "https://github.com/${SRC_REPO}"
 
   depends_on arch: :arm64
-  depends_on macos: ">= :big_sur"
+  depends_on macos: :big_sur
+
 
   app "omnihear.app"
 
