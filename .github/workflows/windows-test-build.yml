@@ -1,0 +1,34 @@
+name: Windows test build
+
+# Manual test build: produces the installer as a workflow artifact,
+# no release, no APT repo touched. Trigger from the Actions tab.
+on:
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install packaging tools
+        run: pip install pyinstaller -r src/requirements-win.txt
+
+      - name: Build with PyInstaller
+        run: pyinstaller --noconsole --onedir --name omnihear --paths src --collect-all faster_whisper --collect-all ctranslate2 windows/entry.py
+
+      - name: Build installer with Inno Setup
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DVersion=0.0.0-test windows\omnihear.iss
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: omnihear-setup-test
+          path: dist-installer/omnihear-setup-0.0.0-test.exe

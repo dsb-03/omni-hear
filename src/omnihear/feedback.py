@@ -4,6 +4,7 @@ Everything here fails silently if the tools are missing or error out.
 """
 
 import subprocess
+import sys
 
 _BEEP_SOUNDS = [
     "/usr/share/sounds/freedesktop/stereo/message.oga",
@@ -27,6 +28,8 @@ class Feedback:
     def notify(self, title: str, body: str = "", urgency: str = "low"):
         if not self.notify_enabled:
             return
+        if sys.platform == "win32":
+            return  # ponytail: no-op on Windows, add toast via winrt if requested
         if len(body) > 120:
             body = body[:117] + "..."
         self._run(
@@ -36,6 +39,13 @@ class Feedback:
 
     def beep(self):
         if not self.beep_enabled:
+            return
+        if sys.platform == "win32":
+            try:
+                import winsound
+                winsound.MessageBeep()
+            except Exception:
+                pass
             return
         import shutil
         import os

@@ -3,6 +3,7 @@
 import json
 import os
 import subprocess
+import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
@@ -964,6 +965,7 @@ async function openLog(offset, q, total) {
 const KEY_NAMES = __KEY_NAMES__;
 const MODELS = __MODELS__;
 const LANGUAGE_NAMES = __LANGS__;
+const TYPE_METHODS = __TYPE_METHODS__;
 const LANGUAGES = [['auto','Auto-detect Language']].concat(
   Object.entries(LANGUAGE_NAMES).map(([c,n]) => [c, `${n} (${c})`]));
 const COMPUTE_TYPES = ['int8','float16','int8_float16','float32'];
@@ -1037,7 +1039,7 @@ function fieldHtml(k, v) {
     return `<label class="check"${titleAttr(k)}><input type="checkbox" name="${k}"${v?' checked':''}>` +
            `<span>${pretty(k)}</span><div class="switch-slider"></div></label>`;
   if (k === 'device') return selectOf(k, ['cpu','cuda'], v);
-  if (k === 'type_method') return selectOf(k, ['pynput','xdotool'], v);
+  if (k === 'type_method') return selectOf(k, TYPE_METHODS, v);
   if (k === 'compute_type') return selectOf(k, COMPUTE_TYPES, v);
   if (k === 'model')
     return customSelect(k,
@@ -1220,7 +1222,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     .replace("__MODELS__",
                              json.dumps(config_mod.MODEL_NAMES))
                     .replace("__LANGS__",
-                             json.dumps(config_mod.LANGUAGE_NAMES)))
+                             json.dumps(config_mod.LANGUAGE_NAMES))
+                    .replace("__TYPE_METHODS__",
+                             json.dumps(["pynput"] if sys.platform == "win32"
+                                         else ["pynput", "xdotool"])))
             self._send(200, page.encode(), "text/html; charset=utf-8")
         elif url.path == "/api/history":
             if db is None:
@@ -1274,7 +1279,14 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._send(200, {"saved": sorted(clean), "errors": errors,
                              "message": msg})
         elif url.path == "/api/restart":
-            if os.environ.get("INVOCATION_ID"):
+            if sys.platform == "win32":
+                # Frozen (PyInstaller) argv[0] is the exe itself; drop it so
+                # the relaunch doesn't get its own path as a positional arg.
+                threading.Timer(0.5, lambda: os.execv(
+                    sys.executable, [sys.executable] + sys.argv[1:]
+                )).start()
+                self._send(200, {"message": "Restarting…"})
+            elif os.environ.get("INVOCATION_ID"):
                 # Running under systemd: ask it to restart us.
                 threading.Timer(0.5, lambda: subprocess.Popen(
                     ["systemctl", "--user", "restart", "omnihear"]

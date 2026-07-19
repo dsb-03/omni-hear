@@ -56,3 +56,33 @@ jobs:
       - name: Clean up signing key
         if: always()
         run: gpgconf --kill gpg-agent && rm -rf /home/runner/.gnupg
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=$($env:GITHUB_REF_NAME.TrimStart('v'))" >> $env:GITHUB_OUTPUT
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install packaging tools
+        run: pip install pyinstaller -r src/requirements-win.txt
+
+      - name: Build with PyInstaller
+        run: pyinstaller --noconsole --onedir --name omnihear --paths src --collect-all faster_whisper --collect-all ctranslate2 windows/entry.py
+
+      - name: Build installer with Inno Setup
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DVersion=${{ steps.version.outputs.version }} windows\omnihear.iss
+
+      - name: Attach installer to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist-installer/omnihear-setup-${{ steps.version.outputs.version }}.exe

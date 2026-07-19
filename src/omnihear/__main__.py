@@ -108,6 +108,10 @@ def main():
         from .dashboard import start_dashboard
         start_dashboard(db, app.status, port=cfg["dashboard_port"])
 
+    if sys.platform == "win32":
+        from .tray import start_tray
+        start_tray(cfg["dashboard_port"], app.stop)
+
     try:
         app.run()
     except KeyboardInterrupt:

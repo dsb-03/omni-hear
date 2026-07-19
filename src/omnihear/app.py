@@ -144,6 +144,7 @@ class App:
         self._stream = None
         self._verbose = bool(cfg.get("verbose"))
         self._overlay = None
+        self._listener = None
         try:
             self._overlay = RecordingOverlay()
         except Exception as e:
@@ -358,8 +359,13 @@ class App:
               "record, release to transcribe & type. Ctrl+C to quit.")
         print("Model loads lazily on first press; first transcription "
               "after load takes a few extra seconds.")
-        with keyboard.Listener(on_press=on_press, on_release=on_release) as listener:
+        self._listener = keyboard.Listener(on_press=on_press, on_release=on_release)
+        with self._listener as listener:
             listener.join()
+
+    def stop(self):
+        if self._listener is not None:
+            self._listener.stop()
 
 
 def list_devices():

@@ -2,6 +2,7 @@
 
 import os
 import sqlite3
+import sys
 import threading
 from pathlib import Path
 
@@ -23,7 +24,10 @@ CREATE TABLE IF NOT EXISTS transcriptions (
 
 
 def db_path() -> Path:
-    base = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
+    if sys.platform == "win32":
+        base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+    else:
+        base = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
     return Path(base) / "omnihear" / "history.db"
 
 

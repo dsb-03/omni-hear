@@ -108,8 +108,23 @@ git push
 Or tag a release (`git tag v1.1.0 && git push origin v1.1.0`) to let
 `.github/workflows/release.yml` build and publish it automatically.
 
+## Windows
+
+An unsigned installer is published on the
+[GitHub Releases](../../releases) page as `omnihear-setup-*.exe`. Windows
+SmartScreen will flag it as unrecognized — click "More info" then
+"Run anyway" to proceed.
+
+The first hotkey press downloads the selected Whisper model, so it takes a
+few extra seconds. Config lives at `%APPDATA%\omnihear\config.toml`,
+history at `%LOCALAPPDATA%\omnihear\history.db`. Omnihear runs from a
+system tray icon (no terminal window) with "Open Dashboard" and "Quit"
+menu items; the dashboard's Restart button relaunches the process directly
+(no systemd equivalent needed on Windows).
+
 ## Requirements
 
 - X11 session (Wayland not currently supported — global hotkeys and
-  synthetic keystroke injection work differently there)
+  synthetic keystroke injection work differently there); Windows is
+  supported via the installer above
 - A microphone

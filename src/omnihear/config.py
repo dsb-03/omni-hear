@@ -6,6 +6,7 @@ serializer (str/int/float/bool only).
 """
 
 import os
+import sys
 import tomllib
 from pathlib import Path
 
@@ -123,7 +124,10 @@ KEY_TYPES = {k: type(v) for k, v in DEFAULTS.items()}
 
 
 def config_path() -> Path:
-    base = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+    if sys.platform == "win32":
+        base = os.environ.get("APPDATA") or os.path.expanduser("~")
+    else:
+        base = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
     return Path(base) / "omnihear" / "config.toml"
 
 
@@ -210,6 +214,9 @@ def validate_updates(updates: dict) -> tuple[dict, list[str]]:
         del clean["device"]
     if "type_method" in clean and clean["type_method"] not in ("pynput", "xdotool"):
         errors.append("type_method must be pynput or xdotool")
+        del clean["type_method"]
+    if "type_method" in clean and clean["type_method"] == "xdotool" and sys.platform == "win32":
+        errors.append("type_method 'xdotool' is not supported on Windows")
         del clean["type_method"]
     if "language" in clean:
         lang = clean["language"].strip().lower()
