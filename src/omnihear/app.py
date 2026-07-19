@@ -129,10 +129,12 @@ class RecordingOverlay:
 
 
 class App:
-    def __init__(self, cfg: dict, db=None, feedback=None):
+    def __init__(self, cfg: dict, db=None, feedback=None, brain=None):
         self.cfg = cfg
         self.db = db
         self.feedback = feedback
+        self.brain = brain
+        self._hotwords_supported = True  # cleared if faster-whisper is too old
 
         self._model = None
         self._model_lock = threading.Lock()
@@ -171,6 +173,12 @@ class App:
             "model_loaded": self._model is not None,
             "recording": self._recording,
         }
+
+    def _brain_active(self) -> bool:
+        if self.brain is None:
+            return False
+        from . import cloud
+        return cloud.beta_active()
 
     # -- model lifecycle ---------------------------------------------
     def _get_model(self):
@@ -326,8 +334,7 @@ class App:
         language = self.cfg["language"]
         if language in ("", "auto"):
             language = None  # let faster-whisper auto-detect
-        segments, _ = model.transcribe(
-            audio,
+        kwargs = dict(
             language=language,
             beam_size=self.cfg["beam_size"],
             vad_filter=self.cfg["vad_filter"],
@@ -336,8 +343,24 @@ class App:
             compression_ratio_threshold=self.cfg["compression_ratio_threshold"],
             condition_on_previous_text=self.cfg["condition_on_previous_text"],
         )
+        if self._brain_active() and self.cfg.get("brain_hotwords"):
+            if self._hotwords_supported:
+                kwargs["hotwords"] = self.brain.hotwords()
+            kwargs["initial_prompt"] = self.brain.initial_prompt()
+        try:
+            segments, _ = model.transcribe(audio, **kwargs)
+        except TypeError:
+            # older faster-whisper without hotwords support
+            self._hotwords_supported = False
+            kwargs.pop("hotwords", None)
+            segments, _ = model.transcribe(audio, **kwargs)
         segments = list(segments)
         text = "".join(seg.text for seg in segments).strip()
+        if text and self._brain_active() and self.cfg.get("brain_autocorrect"):
+            try:
+                text = self.brain.apply(text)
+            except Exception as e:
+                self._log(f"brain apply failed: {e}")
         avg_logprob = no_speech_prob = compression_ratio = None
         if segments:
             n = len(segments)
@@ -369,6 +392,11 @@ class App:
                                compression_ratio=compression_ratio)
             except Exception as e:
                 print(f"History write failed: {e}")
+        try:
+            from . import cloud
+            cloud.track_activation()
+        except Exception:
+            pass
 
     # -- main loop -----------------------------------------------------
     def run(self):

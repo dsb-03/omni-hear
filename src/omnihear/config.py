@@ -119,6 +119,11 @@ DEFAULTS = {
     "history": True,
     "idle_unload_minutes": 10,
     "verbose": False,
+    "brain": True,
+    "brain_autocorrect": True,
+    "brain_hotwords": True,
+    "brain_min_count": 2,
+    "analytics": False,
 }
 
 # Keys editable via the dashboard, with expected types.
@@ -242,6 +247,9 @@ def validate_updates(updates: dict) -> tuple[dict, list[str]]:
         if key in clean and clean[key] <= 0:
             errors.append(f"{key} must be positive")
             del clean[key]
+    if "brain_min_count" in clean and clean["brain_min_count"] < 1:
+        errors.append("brain_min_count must be >= 1")
+        del clean["brain_min_count"]
     if "idle_unload_minutes" in clean and clean["idle_unload_minutes"] < 0:
         errors.append("idle_unload_minutes must be >= 0")
         del clean["idle_unload_minutes"]

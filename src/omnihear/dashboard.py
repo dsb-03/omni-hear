@@ -646,6 +646,7 @@ tr.clickable td { transition:background 0.15s,color 0.15s; }
       <a href="#/" id="nav-dashboard">Dashboard</a>
       <a href="#/history" id="nav-history">History</a>
       <a href="#/settings" id="nav-settings">Settings</a>
+      <a href="#/beta" id="nav-beta">Beta</a>
     </nav>
     <button id="theme-toggle" type="button" aria-label="Toggle Theme">
       <svg id="icon-moon" viewBox="0 0 24 24">
@@ -731,6 +732,63 @@ tr.clickable td { transition:background 0.15s,color 0.15s; }
       Configuration is saved to <code>~/.config/omnihear/config.toml</code> and requires a restart to take effect.
     </p>
   </section>
+
+  <!-- Beta Screen -->
+  <section class="screen" id="screen-beta">
+    <h2>Omnihear Beta</h2>
+    <div class="card" id="beta-auth" style="margin-bottom:24px;"></div>
+    <div id="beta-locked-note" style="display:none;font-size:13px;color:var(--text-muted);margin:-12px 4px 16px;">
+      Sign in (free) to unlock the Common Brain, experimental features and the feedback hub.
+      Everything below runs 100% locally — audio, transcripts and learned data never leave this device.
+    </div>
+    <div id="beta-features">
+      <h2>Common Brain</h2>
+      <div class="card" style="margin-bottom:24px;">
+        <div class="tiles" id="brain-tiles" style="margin-bottom:16px;"></div>
+        <div style="display:flex;gap:8px;margin-bottom:12px;">
+          <input id="brain-add-word" placeholder="Teach a word (name, product, jargon)…" style="flex:1;">
+          <button class="action primary" id="brain-add-btn" type="button">Add word</button>
+        </div>
+        <div class="table-container" style="max-height:260px;overflow-y:auto;">
+          <table><thead><tr><th>Learned word</th><th class="num">Seen</th><th></th></tr></thead>
+          <tbody id="brain-words"></tbody></table>
+        </div>
+        <h3 style="margin-top:20px;">Learned corrections</h3>
+        <div class="table-container" style="max-height:260px;overflow-y:auto;">
+          <table><thead><tr><th>Heard</th><th>Corrected to</th><th class="num">Times</th><th></th></tr></thead>
+          <tbody id="brain-corrs"></tbody></table>
+        </div>
+        <p style="font-size:12px;color:var(--text-muted);margin-top:12px;">
+          Corrections are captured when you edit a transcription in History → detail view.
+          After a correction repeats, it is auto-applied and its words are fed to Whisper as hotwords.
+        </p>
+      </div>
+      <h2>Experimental</h2>
+      <div class="card" style="margin-bottom:24px;">
+        <form id="beta-cfg"></form>
+        <div class="btn-group">
+          <button class="action primary" id="beta-save" type="button">Save beta settings</button>
+          <span id="beta-msg"></span>
+        </div>
+      </div>
+      <h2>Feedback</h2>
+      <div class="card">
+        <div class="cfg-grid">
+          <label>type<select id="fb-kind"><option value="bug">Bug report</option><option value="feature">Feature request</option></select></label>
+          <label>title<input id="fb-title" placeholder="Short summary"></label>
+        </div>
+        <label style="display:block;margin-top:12px;">details
+          <textarea id="fb-body" rows="4" style="width:100%;box-sizing:border-box;" placeholder="What happened / what would you like?"></textarea>
+        </label>
+        <label class="check" style="margin-top:8px;"><input type="checkbox" id="fb-diag">
+          <span>Attach diagnostics (performance metrics only — never transcript text)</span><div class="switch-slider"></div></label>
+        <div class="btn-group">
+          <button class="action primary" id="fb-send" type="button">Send feedback</button>
+          <span id="fb-msg"></span>
+        </div>
+      </div>
+    </div>
+  </section>
 </div>
 
 
@@ -773,14 +831,19 @@ function route() {
   const isHist = h.startsWith('#/history');
   const isLog  = h.startsWith('#/log');
   const isSett = h === '#/settings';
-  ['dashboard','history','log','settings'].forEach(id => {
+  const isBeta = h === '#/beta';
+  ['dashboard','history','log','settings','beta'].forEach(id => {
     const el = document.getElementById('screen-' + id);
     if (el) el.classList.remove('active');
   });
   $('#nav-dashboard').classList.toggle('active', isDash);
   $('#nav-history').classList.toggle('active', isHist || isLog);
   $('#nav-settings').classList.toggle('active', isSett);
-  if (isLog) {
+  $('#nav-beta').classList.toggle('active', isBeta);
+  if (isBeta) {
+    document.getElementById('screen-beta').classList.add('active');
+    loadBeta();
+  } else if (isLog) {
     document.getElementById('screen-log').classList.add('active');
     const p = hashParams();
     openLog(parseInt(p.get('offset') || '0', 10), p.get('q') || '', parseInt(p.get('total') || '0', 10));
@@ -991,7 +1054,6 @@ async function openLog(offset, q, total) {
   const r = rows[0];
   const fields = [
     ['Timestamp', r.ts ? r.ts.replace('T', ' ') : '–'],
-    ['Transcription', r.text],
     ['Audio Duration', r.audio_seconds ? r.audio_seconds.toFixed(2) + ' s' : '–'],
     ['Transcribe Latency', r.transcribe_ms ? Math.round(r.transcribe_ms) + ' ms' : '–'],
     ['CPU Usage', r.cpu_percent != null ? r.cpu_percent.toFixed(1) + '%' : '–'],
@@ -1001,12 +1063,32 @@ async function openLog(offset, q, total) {
     ['No-Speech Probability', r.no_speech_prob != null ? r.no_speech_prob.toFixed(3) : '–'],
     ['Compression Ratio', r.compression_ratio != null ? r.compression_ratio.toFixed(3) : '–'],
   ];
-  card.innerHTML = fields.map(([lbl, val], idx) =>
+  const corrHtml =
+    `<div class="log-field">` +
+    `<div class="log-field-label">Transcription${r.corrected_text ? ' (corrected)' : ''}</div>` +
+    `<textarea id="log-corr" rows="3" style="width:100%;box-sizing:border-box;` +
+    `font:inherit;margin-top:4px;">${esc(r.corrected_text || r.text)}</textarea>` +
+    `<div class="btn-group" style="margin-top:8px;">` +
+    `<button class="action primary" id="log-corr-save" type="button">Save correction</button>` +
+    `<span id="log-corr-msg" style="font-size:13px;"></span></div>` +
+    (r.corrected_text ? `<div style="font-size:12px;color:var(--text-muted);margin-top:6px;">Original: ${esc(r.text)}</div>` : '') +
+    `</div>`;
+  card.innerHTML = corrHtml + fields.map(([lbl, val]) =>
     `<div class="log-field">` +
     `<div class="log-field-label">${esc(lbl)}</div>` +
-    `<div class="log-field-value${idx === 1 ? ' main-text' : ''}">${esc(String(val))}</div>` +
+    `<div class="log-field-value">${esc(String(val))}</div>` +
     `</div>`
   ).join('');
+  $('#log-corr-save').onclick = async () => {
+    const res = await api('/api/correction', { method: 'POST',
+      body: JSON.stringify({ id: r.id, text: $('#log-corr').value }) });
+    const m = $('#log-corr-msg');
+    if (res.ok) {
+      m.textContent = res.learned && res.learned.length
+        ? '✓ Learned: ' + res.learned.map(p => `${p[0]} → ${p[1]}`).join(', ')
+        : '✓ Saved' + (res.learned ? '' : '');
+    } else m.textContent = res.error || 'Failed';
+  };
   const hasPrev = offset > 0;
   const hasNext = !histTotal || offset < histTotal - 1;
   const tot = histTotal ? ' / ' + histTotal : '';
@@ -1025,7 +1107,7 @@ const LANGUAGES = [['auto','Auto-detect Language']].concat(
   Object.entries(LANGUAGE_NAMES).map(([c,n]) => [c, `${n} (${c})`]));
 const COMPUTE_TYPES = ['int8','float16','int8_float16','float32'];
 const BOOLS = ['dashboard','notify','beep','history','verbose','vad_filter',
-  'condition_on_previous_text'];
+  'condition_on_previous_text','brain','brain_autocorrect','brain_hotwords','analytics'];
 const NUMBERS = {
   sample_rate: {min: 8000, step: 1000},
   beam_size: {min: 1, step: 1},
@@ -1035,7 +1117,10 @@ const NUMBERS = {
   no_speech_threshold: {min: 0, max: 1, step: 0.05},
   log_prob_threshold: {min: -5, max: 0, step: 0.1},
   compression_ratio_threshold: {min: 1, max: 10, step: 0.1},
+  brain_min_count: {min: 1, step: 1},
 };
+// Beta-only settings: rendered on #/beta, never in #/settings.
+const BETA_KEYS = ['brain','brain_autocorrect','brain_hotwords','brain_min_count','analytics'];
 const SECTIONS = [
   ['Transcription Engine', ['model','language','device','compute_type','beam_size']],
   ['Input & Trigger', ['hotkey','sample_rate','min_duration','type_method']],
@@ -1067,6 +1152,11 @@ const HELP = {
   beep: 'Play a short sound on transcription.',
   idle_unload_minutes: 'Unload the model from memory after this many minutes of inactivity (0 = never).',
   verbose: 'Print per-transcription logs to the terminal.',
+  brain: 'Common Brain: learn locally from your transcript corrections.',
+  brain_autocorrect: 'Automatically apply learned corrections to new transcriptions.',
+  brain_hotwords: 'Feed learned vocabulary to Whisper as hotwords / initial prompt.',
+  brain_min_count: 'How many times a correction must repeat before it is auto-applied.',
+  analytics: 'Opt-in anonymous usage pings (version and platform only — never audio or text).',
 };
 const pretty = k => k.replace(/_/g, ' ');
 const keyDisplay = hk => String(hk).split('+').filter(Boolean)
@@ -1230,6 +1320,101 @@ $('#restart').addEventListener('click', async () => {
   showMsg(res.message, false);
 });
 
+// --- Beta Screen ---
+async function loadBeta() {
+  const [b, cfg] = await Promise.all([api('/api/brain'), api('/api/config')]);
+  const st = b.beta || {};
+  const auth = $('#beta-auth');
+  if (st.signed_in) {
+    auth.innerHTML =
+      `<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">` +
+      `<span style="font-weight:600;">${esc(st.email || '')}</span>` +
+      `<span class="hotkey-badge">${st.beta_access ? 'BETA ACTIVE' : 'NO BETA ACCESS'}</span>` +
+      `<span style="flex:1"></span>` +
+      `<button class="action" id="beta-logout" type="button">Sign out</button></div>`;
+    $('#beta-logout').onclick = async () => { await api('/api/auth/logout', {method:'POST'}); loadBeta(); };
+  } else {
+    auth.innerHTML =
+      `<div class="cfg-grid">` +
+      `<label>email<input id="auth-email" type="email" placeholder="you@example.com"></label>` +
+      `<label>password<input id="auth-pw" type="password" placeholder="••••••••"></label></div>` +
+      `<div class="btn-group"><button class="action primary" id="auth-login" type="button">Sign in</button>` +
+      `<button class="action" id="auth-signup" type="button">Create free account</button>` +
+      `<span id="auth-msg" style="font-size:13px;"></span></div>`;
+    const doAuth = async path => {
+      $('#auth-msg').textContent = '…';
+      const res = await api(path, { method: 'POST', body: JSON.stringify(
+        { email: $('#auth-email').value.trim(), password: $('#auth-pw').value }) });
+      if (res.error) $('#auth-msg').textContent = res.error;
+      else if (res.confirm_email) $('#auth-msg').textContent = 'Check your email to confirm, then sign in.';
+      else loadBeta();
+    };
+    $('#auth-login').onclick = () => doAuth('/api/auth/login');
+    $('#auth-signup').onclick = () => doAuth('/api/auth/signup');
+  }
+  const unlocked = !!st.beta_access;
+  const feats = $('#beta-features');
+  feats.style.opacity = unlocked ? '' : '0.45';
+  feats.style.pointerEvents = unlocked ? '' : 'none';
+  $('#beta-locked-note').style.display = unlocked ? 'none' : 'block';
+
+  const s = b.stats || {corrections: 0, words: 0, reinforced: 0};
+  $('#brain-tiles').innerHTML = [
+    [s.words, 'learned words'], [s.corrections, 'corrections'],
+    [s.reinforced, 'times reinforced'],
+  ].map(([v,l]) => `<div class="tile"><div class="v">${esc(v)}</div><div class="l">${esc(l)}</div></div>`).join('');
+  $('#brain-words').innerHTML = (b.words || []).map(w =>
+    `<tr><td>${esc(w.word)}${w.manual ? ' <span style="font-size:11px;color:var(--text-muted)">(manual)</span>' : ''}</td>` +
+    `<td class="num">${w.count}</td>` +
+    `<td class="num"><button class="pag-btn" onclick="betaDelWord('${esc(w.word).replace(/'/g, "\\'")}')">✕</button></td></tr>`
+  ).join('') || `<tr><td colspan="3" style="text-align:center;padding:16px;color:var(--text-muted)">Nothing learned yet.</td></tr>`;
+  $('#brain-corrs').innerHTML = (b.corrections || []).map(c =>
+    `<tr><td>${esc(c.original)}</td><td style="font-weight:600;">${esc(c.corrected)}</td>` +
+    `<td class="num">${c.count}</td>` +
+    `<td class="num"><button class="pag-btn" onclick="betaDelCorr(${c.id})">✕</button></td></tr>`
+  ).join('') || `<tr><td colspan="4" style="text-align:center;padding:16px;color:var(--text-muted)">No corrections yet — edit a transcription in History.</td></tr>`;
+
+  $('#beta-cfg').innerHTML = `<div class="cfg-grid">` +
+    BETA_KEYS.filter(k => k in cfg).map(k => fieldHtml(k, cfg[k])).join('') + `</div>`;
+}
+
+function betaMsg(sel, text) { const m = $(sel); m.textContent = text; setTimeout(() => { m.textContent = ''; }, 4000); }
+
+async function betaDelWord(w) { await api('/api/brain/word', {method:'POST', body: JSON.stringify({word: w, delete: true})}); loadBeta(); }
+async function betaDelCorr(id) { await api('/api/brain/correction-delete', {method:'POST', body: JSON.stringify({id})}); loadBeta(); }
+
+$('#brain-add-btn').addEventListener('click', async () => {
+  const w = $('#brain-add-word').value.trim();
+  if (!w) return;
+  await api('/api/brain/word', {method:'POST', body: JSON.stringify({word: w})});
+  $('#brain-add-word').value = '';
+  loadBeta();
+});
+
+$('#beta-save').addEventListener('click', async () => {
+  const form = $('#beta-cfg');
+  const data = {};
+  for (const k of BETA_KEYS) {
+    const el = form.elements[k];
+    if (!el) continue;
+    data[k] = BOOLS.includes(k) ? el.checked : el.value;
+  }
+  const res = await api('/api/config', {method:'POST',
+    headers: {'Content-Type':'application/json'}, body: JSON.stringify(data)});
+  betaMsg('#beta-msg', res.errors && res.errors.length ? 'Errors: ' + res.errors.join('; ')
+    : '✓ Saved — restart omnihear to apply.');
+});
+
+$('#fb-send').addEventListener('click', async () => {
+  const title = $('#fb-title').value.trim(), body = $('#fb-body').value.trim();
+  if (!title || !body) { betaMsg('#fb-msg', 'Title and details are required.'); return; }
+  const res = await api('/api/feedback', {method:'POST', body: JSON.stringify({
+    kind: $('#fb-kind').value, title, body,
+    include_diagnostics: $('#fb-diag').checked})});
+  if (res.ok) { betaMsg('#fb-msg', '✓ Thanks — feedback sent!'); $('#fb-title').value = ''; $('#fb-body').value = ''; }
+  else betaMsg('#fb-msg', res.error || 'Failed to send.');
+});
+
 let t;
 $('#q').addEventListener('input', () => {
   clearTimeout(t);
@@ -1253,6 +1438,19 @@ setInterval(() => { if (!isRecording) refreshCurrentScreen(); }, 8000);
 """
 
 
+def _auth_error(e: Exception) -> str:
+    """Human-readable message from a Supabase/urllib failure."""
+    try:
+        import urllib.error
+        if isinstance(e, urllib.error.HTTPError):
+            body = json.loads(e.read() or b"{}")
+            return (body.get("msg") or body.get("error_description")
+                    or body.get("message") or f"HTTP {e.code}")
+    except Exception:
+        pass
+    return str(e) or "network error"
+
+
 class DashboardHandler(BaseHTTPRequestHandler):
     # set on the server: server.db, server.effective_config, server.status_fn
 
@@ -1266,6 +1464,17 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
+
+    def _json_body(self) -> dict | None:
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length) or b"{}")
+            if not isinstance(body, dict):
+                raise ValueError
+            return body
+        except (ValueError, json.JSONDecodeError):
+            self._send(400, {"error": "invalid JSON body"})
+            return None
 
     def do_GET(self):
         url = urlparse(self.path)
@@ -1310,6 +1519,17 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self._send(200, db.stats())
         elif url.path == "/api/config":
             self._send(200, config_mod.load_config())
+        elif url.path == "/api/brain":
+            brain = getattr(self.server, "brain", None)
+            from . import cloud
+            out = {"beta": cloud.status(), "enabled": brain is not None}
+            if brain is not None:
+                out.update(stats=brain.stats(), words=brain.list_words(),
+                           corrections=brain.list_corrections())
+            self._send(200, out)
+        elif url.path == "/api/auth/status":
+            from . import cloud
+            self._send(200, cloud.status())
         elif url.path == "/api/status":
             st = dict(self.server.status_fn())
             if sys.platform == "darwin":
@@ -1359,6 +1579,84 @@ class DashboardHandler(BaseHTTPRequestHandler):
             else:
                 self._send(200, {"message":
                                  "Not running under systemd; restart omnihear manually."})
+        elif url.path == "/api/correction":
+            body = self._json_body()
+            if body is None:
+                return
+            db, brain = self.server.db, getattr(self.server, "brain", None)
+            row_id, text = body.get("id"), (body.get("text") or "").strip()
+            if db is None or not isinstance(row_id, int) or not text:
+                self._send(400, {"error": "need id and text"})
+                return
+            row = db.get(row_id)
+            if row is None:
+                self._send(404, {"error": "not found"})
+                return
+            db.set_corrected(row_id, text)
+            learned = []
+            from . import cloud
+            if brain is not None and cloud.beta_active():
+                learned = brain.learn_correction(row["text"], text, row_id)
+            self._send(200, {"ok": True, "learned": learned})
+        elif url.path in ("/api/auth/login", "/api/auth/signup"):
+            body = self._json_body()
+            if body is None:
+                return
+            from . import cloud
+            try:
+                fn = cloud.sign_in if url.path.endswith("login") else cloud.sign_up
+                self._send(200, fn(body.get("email", ""), body.get("password", "")))
+            except Exception as e:
+                self._send(200, {"error": _auth_error(e)})
+        elif url.path == "/api/auth/logout":
+            from . import cloud
+            cloud.sign_out()
+            self._send(200, {"ok": True})
+        elif url.path == "/api/brain/word":
+            body = self._json_body()
+            if body is None:
+                return
+            brain = getattr(self.server, "brain", None)
+            word = (body.get("word") or "").strip()
+            if brain is None or not word:
+                self._send(400, {"error": "brain disabled or empty word"})
+                return
+            if body.get("delete"):
+                brain.delete_word(word)
+            else:
+                brain.add_word(word)
+            self._send(200, {"ok": True})
+        elif url.path == "/api/brain/correction-delete":
+            body = self._json_body()
+            if body is None:
+                return
+            brain = getattr(self.server, "brain", None)
+            if brain is None or not isinstance(body.get("id"), int):
+                self._send(400, {"error": "brain disabled or bad id"})
+                return
+            brain.delete_correction(body["id"])
+            self._send(200, {"ok": True})
+        elif url.path == "/api/feedback":
+            body = self._json_body()
+            if body is None:
+                return
+            from . import cloud
+            diagnostics = None
+            if body.get("include_diagnostics") and self.server.db is not None:
+                # metrics only — never transcript text
+                rows = self.server.db.search(limit=50)
+                diagnostics = json.dumps([
+                    {k: r.get(k) for k in ("ts", "audio_seconds", "transcribe_ms",
+                                           "model", "cpu_percent", "memory_mb",
+                                           "avg_logprob", "no_speech_prob",
+                                           "compression_ratio")}
+                    for r in rows])
+            try:
+                self._send(200, cloud.submit_feedback(
+                    body.get("kind", ""), (body.get("title") or "").strip(),
+                    (body.get("body") or "").strip(), diagnostics))
+            except Exception as e:
+                self._send(200, {"error": _auth_error(e)})
         elif url.path == "/api/open-settings":
             name = ""
             try:
@@ -1380,7 +1678,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._send(404, {"error": "not found"})
 
 
-def start_dashboard(db, status_fn, port: int = 4738):
+def start_dashboard(db, status_fn, port: int = 4738, brain=None):
     """Start the dashboard server on 127.0.0.1 in a daemon thread.
 
     Returns the server, or None if the port could not be bound.
@@ -1393,6 +1691,7 @@ def start_dashboard(db, status_fn, port: int = 4738):
     server.daemon_threads = True
     server.db = db
     server.status_fn = status_fn
+    server.brain = brain
     threading.Thread(target=server.serve_forever, daemon=True).start()
     print(f"omnihear: dashboard at http://127.0.0.1:{port}")
     return server
