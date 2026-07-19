@@ -145,14 +145,17 @@ class App:
         self._verbose = bool(cfg.get("verbose"))
         self._overlay = None
         self._listener = None
-        # The Tk overlay runs on a background thread, which macOS Cocoa
-        # forbids (GUI must own the main thread, which the menu-bar tray
-        # takes). Skip it there; the beep + notification cover feedback.
-        if sys.platform != "darwin":
-            try:
+        # macOS can't use the Tk overlay (Cocoa GUI must own the main thread,
+        # which the menu-bar tray takes) — use the native AppKit panel instead,
+        # which also shows a distinct "transcribing" state.
+        try:
+            if sys.platform == "darwin":
+                from .macos_overlay import MacOverlay
+                self._overlay = MacOverlay()
+            else:
                 self._overlay = RecordingOverlay()
-            except Exception as e:
-                print(f"omnihear: warning: overlay could not start: {e}")
+        except Exception as e:
+            print(f"omnihear: warning: overlay could not start: {e}")
 
     def _log(self, msg):
         """Per-transcription chatter; printed only with --verbose."""
@@ -234,13 +237,26 @@ class App:
         self._stream = stream
         self._log("Recording...")
 
+    def _overlay_transcribing(self):
+        """Switch the indicator to the transcribing state (macOS), or just
+        hide it on overlays without one (the Tk overlay is recording-only)."""
+        if not self._overlay:
+            return
+        fn = getattr(self._overlay, "show_transcribing", None)
+        if fn:
+            fn()
+        else:
+            self._overlay.hide()
+
+    def _overlay_idle(self):
+        if self._overlay:
+            self._overlay.hide()
+
     def _stop_recording(self):
         import numpy as np
         if not self._recording:
             return
         self._recording = False
-        if self._overlay:
-            self._overlay.hide()
         stream = self._stream
         stream.stop()
         stream.close()
@@ -250,15 +266,19 @@ class App:
             chunks.append(self._audio_q.get())
         if not chunks:
             self._log("No audio captured.")
+            self._overlay_idle()
             return
         audio = np.concatenate(chunks, axis=0).flatten()
 
         duration = len(audio) / self.cfg["sample_rate"]
         if duration < self.cfg["min_duration"]:
             self._log("Too short, ignoring.")
+            self._overlay_idle()
             return
 
         self._log(f"Queued {duration:.2f}s of audio for transcription...")
+        # Recording -> transcribing; the worker clears it when done.
+        self._overlay_transcribing()
         self._work_q.put((audio, duration))
 
     # -- transcription worker -----------------------------------------
@@ -272,6 +292,10 @@ class App:
                 if self.feedback:
                     self.feedback.notify("omnihear error", str(e),
                                          urgency="normal")
+            finally:
+                # Clear the transcribing indicator once the queue drains.
+                if self._work_q.empty():
+                    self._overlay_idle()
 
     @staticmethod
     def _rss_mb():
