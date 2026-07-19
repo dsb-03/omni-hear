@@ -175,6 +175,29 @@ nav a.active {
   font-size: 14px;
   font-weight: 500;
 }
+.perm-banner {
+  background: color-mix(in srgb, #f59e0b 14%, var(--card));
+  border: 1px solid color-mix(in srgb, #f59e0b 55%, var(--border));
+  border-radius: var(--radius);
+  padding: 14px 20px;
+  margin-bottom: 24px;
+  box-shadow: var(--shadow);
+  font-size: 14px;
+}
+.perm-banner .perm-title { font-weight: 700; margin-bottom: 6px; }
+.perm-banner .perm-sub { opacity: 0.85; margin-bottom: 12px; }
+.perm-banner .perm-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.perm-banner button {
+  background: #f59e0b;
+  color: #1a1200;
+  border: 0;
+  border-radius: 8px;
+  padding: 7px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.perm-banner button:hover { filter: brightness(1.06); }
 .indicator {
   width: 10px;
   height: 10px;
@@ -645,6 +668,9 @@ tr.clickable td { transition:background 0.15s,color 0.15s; }
     </div>
   </div>
 
+  <!-- macOS permission banner (shown only when a grant is missing) -->
+  <div class="perm-banner" id="perm-banner" style="display:none;"></div>
+
   <!-- Dashboard Screen -->
   <section class="screen" id="screen-dashboard">
     <h2>Analytics</h2>
@@ -809,6 +835,35 @@ async function loadStatus() {
   }
 
   $('#status-hotkey-badge').textContent = s.hotkey_display || keyDisplay(s.hotkey);
+  renderPermBanner(s.permissions);
+}
+
+const PERM_LABELS = {
+  accessibility: ['Accessibility', 'type transcribed text'],
+  input_monitoring: ['Input Monitoring', 'detect the hotkey'],
+  microphone: ['Microphone', 'record audio'],
+};
+async function openPermPane(name) {
+  try { await api('/api/open-settings', { method: 'POST', body: JSON.stringify({ name }) }); }
+  catch (e) {}
+}
+function renderPermBanner(perms) {
+  const el = $('#perm-banner');
+  if (!el) return;
+  if (!perms) { el.style.display = 'none'; return; }
+  const missing = Object.keys(PERM_LABELS)
+    .filter(k => perms[k] && perms[k] !== 'authorized' && perms[k] !== 'unknown');
+  if (!missing.length) { el.style.display = 'none'; return; }
+  const btns = missing.map(k =>
+    `<button data-perm="${k}">Open ${PERM_LABELS[k][0]} settings</button>`).join('');
+  el.innerHTML =
+    `<div class="perm-title">⚠️ omnihear needs permission to work</div>` +
+    `<div class="perm-sub">Grant ${missing.map(k => PERM_LABELS[k][0]).join(', ')} in ` +
+    `System&nbsp;Settings → Privacy&nbsp;&amp;&nbsp;Security, then quit and reopen omnihear.</div>` +
+    `<div class="perm-actions">${btns}</div>`;
+  el.querySelectorAll('button[data-perm]').forEach(b =>
+    b.addEventListener('click', () => openPermPane(b.getAttribute('data-perm'))));
+  el.style.display = 'block';
 }
 
 let histTotal = 0;
@@ -1256,7 +1311,14 @@ class DashboardHandler(BaseHTTPRequestHandler):
         elif url.path == "/api/config":
             self._send(200, config_mod.load_config())
         elif url.path == "/api/status":
-            self._send(200, self.server.status_fn())
+            st = dict(self.server.status_fn())
+            if sys.platform == "darwin":
+                try:
+                    from . import macos_permissions as macperm
+                    st["permissions"] = macperm.check()
+                except Exception:
+                    pass
+            self._send(200, st)
         else:
             self._send(404, {"error": "not found"})
 
@@ -1297,6 +1359,23 @@ class DashboardHandler(BaseHTTPRequestHandler):
             else:
                 self._send(200, {"message":
                                  "Not running under systemd; restart omnihear manually."})
+        elif url.path == "/api/open-settings":
+            name = ""
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                body = json.loads(self.rfile.read(length) or b"{}")
+                name = body.get("name", "") if isinstance(body, dict) else ""
+            except (ValueError, json.JSONDecodeError):
+                self._send(400, {"error": "invalid JSON body"})
+                return
+            opened = False
+            if sys.platform == "darwin":
+                try:
+                    from . import macos_permissions as macperm
+                    opened = macperm.open_settings_pane(name)
+                except Exception:
+                    pass
+            self._send(200, {"opened": opened})
         else:
             self._send(404, {"error": "not found"})
 

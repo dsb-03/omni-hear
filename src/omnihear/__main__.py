@@ -119,6 +119,27 @@ def main():
         # block the main thread.
         import threading
         from .tray import start_tray
+
+        # First-run permission onboarding: prompt for anything not yet decided
+        # and tell the user exactly what to grant (the dashboard has one-click
+        # links). Best-effort — never let this block startup.
+        try:
+            from . import macos_permissions as macperm
+            st = macperm.check()
+            macperm.request_prompts(st)
+            miss = macperm.missing(st)
+            if miss:
+                labels = ", ".join(macperm.PERMISSIONS[k]["label"] for k in miss)
+                print(f"omnihear: needs these permissions — enable in System "
+                      f"Settings > Privacy & Security: {labels}")
+                print(f"          one-click links in the dashboard: "
+                      f"http://127.0.0.1:{cfg['dashboard_port']}")
+                if feedback:
+                    feedback.notify("omnihear needs permissions",
+                                    f"Enable {labels} in System Settings.")
+        except Exception as e:
+            print(f"omnihear: permission check skipped: {e}")
+
         threading.Thread(target=app.run, daemon=True).start()
         try:
             start_tray(cfg["dashboard_port"], app.stop)
