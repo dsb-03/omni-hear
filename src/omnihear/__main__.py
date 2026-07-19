@@ -10,7 +10,7 @@ from .app import SPECIAL_KEY_NAMES
 def build_parser(cfg: dict) -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="omnihear",
-        description="Push-to-talk local Whisper transcription (X11).",
+        description="Push-to-talk local Whisper transcription (Linux/X11, Windows, macOS).",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     p.add_argument("--model", default=cfg["model"],
@@ -112,6 +112,19 @@ def main():
             # their output — exit instead.
             sys.exit(f"Port {cfg['dashboard_port']} is already in use — "
                      "is omnihear already running?")
+
+    if sys.platform == "darwin":
+        # On macOS the menu-bar icon must own the main thread (AppKit), so
+        # run the recorder/listener on a background thread and let the tray
+        # block the main thread.
+        import threading
+        from .tray import start_tray
+        threading.Thread(target=app.run, daemon=True).start()
+        try:
+            start_tray(cfg["dashboard_port"], app.stop)
+        except KeyboardInterrupt:
+            pass
+        return
 
     if sys.platform == "win32":
         from .tray import start_tray

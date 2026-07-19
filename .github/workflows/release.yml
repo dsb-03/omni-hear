@@ -89,3 +89,64 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: dist-installer/omnihear-setup-${{ steps.version.outputs.version }}.exe
+
+  build-macos:
+    runs-on: macos-14   # Apple Silicon runner -> arm64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install packaging tools
+        run: pip install pyinstaller -r src/requirements-mac.txt
+
+      - name: Build .icns
+        run: bash macos/make-icns.sh
+
+      - name: Build omnihear.app with PyInstaller
+        env:
+          OMNIHEAR_VERSION: ${{ steps.version.outputs.version }}
+        run: pyinstaller macos/omnihear.spec
+
+      - name: Sign the app (skipped without signing secrets)
+        env:
+          APPLE_SIGN_IDENTITY: ${{ secrets.APPLE_SIGN_IDENTITY }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: bash macos/sign.sh app
+
+      - name: Build DMG
+        run: bash macos/build-dmg.sh "${{ steps.version.outputs.version }}"
+
+      - name: Notarize + staple the DMG (skipped without signing secrets)
+        env:
+          APPLE_SIGN_IDENTITY: ${{ secrets.APPLE_SIGN_IDENTITY }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: bash macos/sign.sh dmg "omnihear-${{ steps.version.outputs.version }}-arm64.dmg"
+
+      - name: Attach DMG to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: omnihear-${{ steps.version.outputs.version }}-arm64.dmg
+
+      - name: Update Homebrew Cask tap (skipped without tap token)
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+          # owner/name of the tap repo, e.g. "your-user/homebrew-omnihear"
+          TAP_REPO: ${{ vars.HOMEBREW_TAP_REPO }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "HOMEBREW_TAP_TOKEN not set -- skipping cask update."
+            exit 0
+          fi
+          bash macos/update-cask.sh

@@ -1,0 +1,38 @@
+name: macOS test build
+
+# Manual test build: produces the DMG as a workflow artifact,
+# no release, no tap touched. Trigger from the Actions tab.
+on:
+  workflow_dispatch:
+
+jobs:
+  build-macos:
+    runs-on: macos-14   # Apple Silicon runner -> arm64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install packaging tools
+        run: pip install pyinstaller -r src/requirements-mac.txt
+
+      - name: Build .icns
+        run: bash macos/make-icns.sh
+
+      - name: Build omnihear.app with PyInstaller
+        env:
+          OMNIHEAR_VERSION: 0.0.0-test
+        run: pyinstaller macos/omnihear.spec
+
+      - name: Build DMG
+        run: bash macos/build-dmg.sh 0.0.0-test
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: omnihear-dmg-test
+          path: omnihear-0.0.0-test-arm64.dmg

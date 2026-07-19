@@ -32,6 +32,16 @@ class Feedback:
             return  # ponytail: no-op on Windows, add toast via winrt if requested
         if len(body) > 120:
             body = body[:117] + "..."
+        if sys.platform == "darwin":
+            # osascript's `display notification` string is an AppleScript
+            # literal — escape backslashes and double quotes.
+            def _esc(s):
+                return s.replace("\\", "\\\\").replace('"', '\\"')
+            self._run(
+                ["osascript", "-e",
+                 f'display notification "{_esc(body)}" with title "{_esc(title)}"']
+            )
+            return
         self._run(
             ["notify-send", "--app-name=omnihear", f"--urgency={urgency}",
              "--expire-time=3000", title, body]
@@ -47,8 +57,15 @@ class Feedback:
             except Exception:
                 pass
             return
-        import shutil
         import os
+        if sys.platform == "darwin":
+            ping = "/System/Library/Sounds/Ping.aiff"
+            if os.path.exists(ping):
+                self._run(["afplay", ping])
+            else:
+                self._run(["osascript", "-e", "beep"])
+            return
+        import shutil
         player = None
         # aplay is ALSA-only and can't decode Ogg Vorbis (_BEEP_SOUNDS are
         # .oga) -- it "succeeds" while playing the file as raw PCM noise.
