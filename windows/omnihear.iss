@@ -10,6 +10,7 @@ AppVersion={#Version}
 DefaultDirName={localappdata}\Programs\Omnihear
 DefaultGroupName=Omnihear
 PrivilegesRequired=lowest
+SetupIconFile=omnihear.ico
 OutputDir=..\dist-installer
 OutputBaseFilename=omnihear-setup-{#Version}
 Compression=lzma2
