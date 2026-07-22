@@ -124,6 +124,8 @@ DEFAULTS = {
     "brain_hotwords": True,
     "brain_min_count": 2,
     "analytics": False,
+    "voice_commands": False,
+    "terminal_commands": False,
 }
 
 # Keys editable via the dashboard, with expected types.
@@ -247,6 +249,10 @@ def validate_updates(updates: dict) -> tuple[dict, list[str]]:
         if key in clean and clean[key] <= 0:
             errors.append(f"{key} must be positive")
             del clean[key]
+    if ("terminal_commands" in clean and clean["terminal_commands"]
+            and sys.platform in ("win32", "darwin")):
+        errors.append("terminal_commands is only supported on X11 (Linux)")
+        del clean["terminal_commands"]
     if "brain_min_count" in clean and clean["brain_min_count"] < 1:
         errors.append("brain_min_count must be >= 1")
         del clean["brain_min_count"]

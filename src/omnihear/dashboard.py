@@ -1107,7 +1107,8 @@ const LANGUAGES = [['auto','Auto-detect Language']].concat(
   Object.entries(LANGUAGE_NAMES).map(([c,n]) => [c, `${n} (${c})`]));
 const COMPUTE_TYPES = ['int8','float16','int8_float16','float32'];
 const BOOLS = ['dashboard','notify','beep','history','verbose','vad_filter',
-  'condition_on_previous_text','brain','brain_autocorrect','brain_hotwords','analytics'];
+  'condition_on_previous_text','brain','brain_autocorrect','brain_hotwords','analytics',
+  'voice_commands','terminal_commands'];
 const NUMBERS = {
   sample_rate: {min: 8000, step: 1000},
   beam_size: {min: 1, step: 1},
@@ -1120,7 +1121,8 @@ const NUMBERS = {
   brain_min_count: {min: 1, step: 1},
 };
 // Beta-only settings: rendered on #/beta, never in #/settings.
-const BETA_KEYS = ['brain','brain_autocorrect','brain_hotwords','brain_min_count','analytics'];
+const BETA_KEYS = ['brain','brain_autocorrect','brain_hotwords','brain_min_count','analytics',
+  'voice_commands','terminal_commands'];
 const SECTIONS = [
   ['Transcription Engine', ['model','language','device','compute_type','beam_size']],
   ['Input & Trigger', ['hotkey','sample_rate','min_duration','type_method']],
@@ -1157,6 +1159,8 @@ const HELP = {
   brain_hotwords: 'Feed learned vocabulary to Whisper as hotwords / initial prompt.',
   brain_min_count: 'How many times a correction must repeat before it is auto-applied.',
   analytics: 'Opt-in anonymous usage pings (version and platform only — never audio or text).',
+  voice_commands: 'Say punctuation words ("comma", "new line") to type symbols, and "scratch that" to undo the last thing typed.',
+  terminal_commands: 'When a terminal is focused inside a git repo, translate phrases like "push to remote origin" into the real git command instead of typing them literally (Linux/X11 only).',
 };
 const pretty = k => k.replace(/_/g, ' ');
 const keyDisplay = hk => String(hk).split('+').filter(Boolean)

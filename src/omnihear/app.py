@@ -6,6 +6,7 @@ package (db, config, dashboard, feedback) stays importable without them.
 """
 
 import gc
+import math
 import queue
 import sys
 import threading
@@ -41,6 +42,15 @@ def parse_hotkey(name):
     return frozenset(resolve_key(p) for p in parts)
 
 
+_BAR_COLOR = "#ff4b3e"        # recording
+_BAR_COLOR_BUSY = "#ffab1a"   # transcribing
+_BAR_COUNT = 5
+_BAR_W = 4
+_BAR_GAP = 5
+_BAR_MIN_H = 6
+_BAR_MAX_H = 22
+
+
 class RecordingOverlay:
     def __init__(self):
         self.root = None
@@ -58,10 +68,11 @@ class RecordingOverlay:
         self.root.overrideredirect(True)
         self.root.attributes("-topmost", True)
 
-        # Small dot, bottom-center of the screen (just above the taskbar) —
-        # near where the user is actually looking while typing, unlike the
-        # old top-right corner placement which sat outside their focus area.
-        w, h = 56, 56
+        # Small waveform badge, bottom-center of the screen (just above the
+        # taskbar) — near where the user is actually looking while typing,
+        # unlike the old top-right corner placement which sat outside their
+        # focus area.
+        w, h = 76, 44
         try:
             screen_w = self.root.winfo_screenwidth()
             screen_h = self.root.winfo_screenheight()
@@ -71,40 +82,59 @@ class RecordingOverlay:
         except Exception:
             self.root.geometry(f"{w}x{h}+900+900")
 
-        self.root.configure(bg="#1a1a19")
+        panel_bg = "#14161c"
+        self.root.configure(bg=panel_bg)
         try:
             self.root.attributes("-alpha", 0.92)
         except Exception:
             pass
 
-        self.canvas = tk.Canvas(self.root, width=w, height=h, bg="#1a1a19", highlightthickness=0)
+        self.canvas = tk.Canvas(self.root, width=w, height=h, bg=panel_bg, highlightthickness=0)
         self.canvas.pack(fill="both", expand=True)
 
-        cx, cy = w / 2, h / 2
-        self.canvas.create_oval(2, 2, w - 2, h - 2, fill="#20242b", width=0)
-        self.pulse_ring = self.canvas.create_oval(cx - 14, cy - 14, cx + 14, cy + 14, outline="#e74c3c", width=2)
-        # Plain filled dot — the universal "recording" glyph, no busy waveform.
-        dot_r = 9
-        self.canvas.create_oval(cx - dot_r, cy - dot_r, cx + dot_r, cy + dot_r, fill="#e74c3c", width=0)
+        cy = h / 2
+        bar_total_w = _BAR_COUNT * _BAR_W + (_BAR_COUNT - 1) * _BAR_GAP
+        start_x = (w - bar_total_w) / 2
+        self.bars = []
+        for i in range(_BAR_COUNT):
+            x = start_x + i * (_BAR_W + _BAR_GAP)
+            bar = self.canvas.create_rectangle(
+                x, cy - _BAR_MIN_H / 2, x + _BAR_W, cy + _BAR_MIN_H / 2,
+                fill=_BAR_COLOR, width=0)
+            self.bars.append((bar, x))
 
         self.root.withdraw()
         self.visible = False
-        self.anim_step = 0
+        self.transcribing = False
 
         def animate():
             if self.visible:
-                self.anim_step = (self.anim_step + 1) % 20
-                scale = 14 + (self.anim_step % 10) * 1.2
-                self.canvas.coords(self.pulse_ring, cx - scale, cy - scale, cx + scale, cy + scale)
-                self.canvas.itemconfig(self.pulse_ring, width=2 if (self.anim_step % 10) < 7 else 1)
+                t = time.monotonic()
+                color = _BAR_COLOR_BUSY if self.transcribing else _BAR_COLOR
+                for i, (bar, x) in enumerate(self.bars):
+                    if self.transcribing:
+                        # A single pulse chases across the bars in sequence —
+                        # visually distinct from recording's organic bounce.
+                        phase = (t * 1.8 - i * 0.28) % 1.0
+                        level = max(0.0, 1 - abs(phase - 0.15) * 6)
+                    else:
+                        level = (math.sin(t * 2.2 + i * 0.9) + 1) / 2
+                    bh = _BAR_MIN_H + level * (_BAR_MAX_H - _BAR_MIN_H)
+                    self.canvas.coords(bar, x, cy - bh / 2, x + _BAR_W, cy + bh / 2)
+                    self.canvas.itemconfig(bar, fill=color)
             if self.root:
-                self.root.after(80, animate)
+                self.root.after(40, animate)
 
         def check_queue():
             try:
                 while not self.queue.empty():
                     action = self.queue.get_nowait()
                     if action == "show":
+                        self.transcribing = False
+                        self.visible = True
+                        self.root.deiconify()
+                    elif action == "transcribing":
+                        self.transcribing = True
                         self.visible = True
                         self.root.deiconify()
                     elif action == "hide":
@@ -116,12 +146,16 @@ class RecordingOverlay:
                 self.root.after(50, check_queue)
 
         self.root.after(50, check_queue)
-        self.root.after(80, animate)
+        self.root.after(40, animate)
         self.root.mainloop()
 
     def show(self):
         if self.thread.is_alive():
             self.queue.put("show")
+
+    def show_transcribing(self):
+        if self.thread.is_alive():
+            self.queue.put("transcribing")
 
     def hide(self):
         if self.thread.is_alive():
@@ -144,6 +178,7 @@ class App:
         self._work_q = queue.Queue()
         self._recording = False
         self._stream = None
+        self._last_typed_len = 0
         self._verbose = bool(cfg.get("verbose"))
         self._overlay = None
         self._listener = None
@@ -219,6 +254,35 @@ class App:
         else:
             self._kb_controller.type(text)
 
+    def _backspace(self, n):
+        """Erase the last n characters typed via _type_text."""
+        if n <= 0:
+            return
+        if self.cfg["type_method"] == "xdotool":
+            import subprocess
+            subprocess.run(["xdotool", "key", "--repeat", str(n), "BackSpace"])
+        else:
+            from pynput.keyboard import Key
+            for _ in range(n):
+                self._kb_controller.press(Key.backspace)
+                self._kb_controller.release(Key.backspace)
+
+    @staticmethod
+    def _clean_audio(audio):
+        """Trim near-silent edges and normalize peak amplitude. vad_filter
+        (faster-whisper) handles silence *segmentation* during decoding but
+        not input *level* -- a quiet mic can still skew the no_speech_prob/
+        avg_logprob confidence thresholds, which normalization fixes."""
+        import numpy as np
+        threshold = 0.01  # ponytail: fixed energy gate, revisit if quiet speech gets clipped
+        loud = np.where(np.abs(audio) > threshold)[0]
+        if loud.size:
+            audio = audio[loud[0]:loud[-1] + 1]
+        peak = np.abs(audio).max() if audio.size else 0.0
+        if peak > 1e-4:
+            audio = audio * (0.9 / peak)
+        return audio
+
     # -- recording ----------------------------------------------------
     def _audio_callback(self, indata, frames_count, time_info, status):
         if status:
@@ -284,6 +348,7 @@ class App:
             self._overlay_idle()
             return
 
+        audio = self._clean_audio(audio)
         self._log(f"Queued {duration:.2f}s of audio for transcription...")
         # Recording -> transcribing; the worker clears it when done.
         self._overlay_transcribing()
@@ -356,11 +421,34 @@ class App:
             segments, _ = model.transcribe(audio, **kwargs)
         segments = list(segments)
         text = "".join(seg.text for seg in segments).strip()
-        if text and self._brain_active() and self.cfg.get("brain_autocorrect"):
-            try:
-                text = self.brain.apply(text)
-            except Exception as e:
-                self._log(f"brain apply failed: {e}")
+
+        voice_cmds = self.cfg.get("voice_commands")
+        if voice_cmds and text:
+            from . import commands
+            if commands.is_undo(text):
+                n, self._last_typed_len = self._last_typed_len, 0
+                if n:
+                    self._backspace(n)
+                    self._log(f"Undid last {n} chars")
+                return  # nothing typed, nothing logged to history
+
+        resolved_cmd = None
+        if self.cfg.get("terminal_commands") and text and sys.platform not in ("win32", "darwin"):
+            from . import terminal_commands
+            resolved_cmd = terminal_commands.translate(text)
+
+        if resolved_cmd:
+            text = resolved_cmd  # bypass brain/punctuation -- it's a command, not prose
+        else:
+            if text and self._brain_active() and self.cfg.get("brain_autocorrect"):
+                try:
+                    text = self.brain.apply(text)
+                except Exception as e:
+                    self._log(f"brain apply failed: {e}")
+            if voice_cmds and text:
+                from . import commands
+                text = commands.apply_punctuation(text)
+
         avg_logprob = no_speech_prob = compression_ratio = None
         if segments:
             n = len(segments)
@@ -382,6 +470,7 @@ class App:
             return
         self._log(f"-> {text}")
         self._type_text(text + " ")
+        self._last_typed_len = len(text) + 1
         if self.feedback:
             self.feedback.notify("omnihear", text, urgency="normal")
         if self.db:
@@ -438,3 +527,21 @@ def list_devices():
     import sounddevice as sd
     print(sd.query_devices())
     sys.exit(0)
+
+
+if __name__ == "__main__":
+    import numpy as np
+
+    sr = 16000
+    t = np.linspace(0, 1, sr, dtype=np.float32)
+    tone = 0.02 * np.sin(2 * np.pi * 440 * t)  # quiet 440Hz tone
+    silence = np.zeros(sr // 2, dtype=np.float32)
+    audio = np.concatenate([silence, tone, silence])
+
+    cleaned = App._clean_audio(audio)
+    assert len(cleaned) < len(audio), "should trim silent edges"
+    assert 0.85 <= np.abs(cleaned).max() <= 0.95, "should normalize peak near 0.9"
+
+    assert App._clean_audio(np.zeros(100, dtype=np.float32)).size == 100  # no-op on pure silence
+
+    print("app self-check OK")
