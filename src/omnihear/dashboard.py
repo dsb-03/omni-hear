@@ -1219,10 +1219,12 @@ const CODE_MAP = {
   MetaLeft:'cmd_l', MetaRight:'cmd_r',
 };
 for (let i = 1; i <= 12; i++) CODE_MAP['F'+i] = 'f'+i;
-function codeToName(code) {
+function codeToName(code, key) {
   if (CODE_MAP[code]) return CODE_MAP[code];
   let m = code.match(/^Key([A-Z])$/);   if (m) return m[1].toLowerCase();
   m = code.match(/^Digit([0-9])$/);     if (m) return m[1];
+  // Punctuation / symbol keys (Backquote, Minus, BracketLeft, …)
+  if (key && key.length === 1) return key.toLowerCase();
   return null;
 }
 
@@ -1254,18 +1256,21 @@ document.addEventListener('keydown', e => {
   e.preventDefault();
   if (e.key === 'Escape') { endCapture(true); return; }
   if (e.repeat) return;
-  const name = codeToName(e.code);
-  if (!name) return;
+  const name = codeToName(e.code, e.key);
+  const btn = $('#hotkey-capture');
+  if (!name) {
+    btn.textContent = 'Key not supported';
+    return;
+  }
   capture.seen.add(name);
   capture.active.add(name);
-  const btn = $('#hotkey-capture');
   btn.textContent = keyDisplay([...capture.seen].join('+'));
 });
 
 document.addEventListener('keyup', e => {
   if (!capture) return;
   e.preventDefault();
-  const name = codeToName(e.code);
+  const name = codeToName(e.code, e.key);
   if (name) capture.active.delete(name);
   if (capture.seen.size && !capture.active.size) endCapture(false);
 });
