@@ -126,6 +126,11 @@ DEFAULTS = {
     "analytics": False,
     "voice_commands": False,
     "terminal_commands": False,
+    "rag_context": False,
+    "rag_context_limit": 3,
+    "ask_hotkey": "",
+    "ask_model": "llama3.2",
+    "ask_context_limit": 5,
 }
 
 # Keys editable via the dashboard, with expected types.
@@ -245,6 +250,18 @@ def validate_updates(updates: dict) -> tuple[dict, list[str]]:
             errors.append("hotkey must be known key names or single characters, "
                           "joined with '+' for combos")
             del clean["hotkey"]
+    if "ask_hotkey" in clean:
+        v = clean["ask_hotkey"].strip()
+        if not v:
+            clean["ask_hotkey"] = ""  # empty disables voice Q&A
+        else:
+            hk = validate_hotkey(v)
+            if hk:
+                clean["ask_hotkey"] = hk
+            else:
+                errors.append("ask_hotkey must be known key names or single "
+                              "characters, joined with '+' for combos")
+                del clean["ask_hotkey"]
     for key in ("dashboard_port", "sample_rate", "beam_size"):
         if key in clean and clean[key] <= 0:
             errors.append(f"{key} must be positive")
@@ -256,6 +273,10 @@ def validate_updates(updates: dict) -> tuple[dict, list[str]]:
     if "brain_min_count" in clean and clean["brain_min_count"] < 1:
         errors.append("brain_min_count must be >= 1")
         del clean["brain_min_count"]
+    for key in ("rag_context_limit", "ask_context_limit"):
+        if key in clean and clean[key] < 1:
+            errors.append(f"{key} must be >= 1")
+            del clean[key]
     if "idle_unload_minutes" in clean and clean["idle_unload_minutes"] < 0:
         errors.append("idle_unload_minutes must be >= 0")
         del clean["idle_unload_minutes"]
