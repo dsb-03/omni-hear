@@ -177,8 +177,10 @@ class App:
         self._audio_q = queue.Queue()
         self._work_q = queue.Queue()
         self._recording = False
+        self._recording_mode = "dictate"
         self._stream = None
         self._last_typed_len = 0
+        self._last_text = ""  # most recent transcript, seeds RAG context lookups
         self._verbose = bool(cfg.get("verbose"))
         self._overlay = None
         self._listener = None
@@ -289,11 +291,12 @@ class App:
             print(status)
         self._audio_q.put(indata.copy())
 
-    def _start_recording(self):
+    def _start_recording(self, mode="dictate"):
         import sounddevice as sd
         if self._recording:
             return
         self._recording = True
+        self._recording_mode = mode
         if self._overlay:
             self._overlay.show()
         if self.feedback:
@@ -329,6 +332,7 @@ class App:
         if not self._recording:
             return
         self._recording = False
+        mode = self._recording_mode
         stream = self._stream
         stream.stop()
         stream.close()
@@ -352,14 +356,14 @@ class App:
         self._log(f"Queued {duration:.2f}s of audio for transcription...")
         # Recording -> transcribing; the worker clears it when done.
         self._overlay_transcribing()
-        self._work_q.put((audio, duration))
+        self._work_q.put((audio, duration, mode))
 
     # -- transcription worker -----------------------------------------
     def _worker_loop(self):
         while True:
-            audio, duration = self._work_q.get()
+            audio, duration, mode = self._work_q.get()
             try:
-                self._transcribe_one(audio, duration)
+                self._transcribe_one(audio, duration, mode)
             except Exception as e:
                 print(f"Transcription error: {e}")
                 if self.feedback:
@@ -392,7 +396,18 @@ class App:
             pass
         return None
 
-    def _transcribe_one(self, audio, duration):
+    def _rag_context_texts(self, query: str, limit: int) -> list[str]:
+        """Best-effort keyword retrieval of relevant past transcriptions."""
+        if not query or self.db is None:
+            return []
+        try:
+            hits = self.db.search_relevant(query, limit=limit)
+        except Exception as e:
+            self._log(f"RAG context lookup failed: {e}")
+            return []
+        return [h["text"] for h in hits]
+
+    def _transcribe_one(self, audio, duration, mode="dictate"):
         model = self._get_model()
         t0 = time.monotonic()
         cpu0 = time.process_time()
@@ -408,10 +423,18 @@ class App:
             compression_ratio_threshold=self.cfg["compression_ratio_threshold"],
             condition_on_previous_text=self.cfg["condition_on_previous_text"],
         )
+        prompt_parts = []
         if self._brain_active() and self.cfg.get("brain_hotwords"):
             if self._hotwords_supported:
                 kwargs["hotwords"] = self.brain.hotwords()
-            kwargs["initial_prompt"] = self.brain.initial_prompt()
+            bp = self.brain.initial_prompt()
+            if bp:
+                prompt_parts.append(bp)
+        if self.cfg.get("rag_context"):
+            prompt_parts.extend(self._rag_context_texts(
+                self._last_text, self.cfg.get("rag_context_limit", 3)))
+        if prompt_parts:
+            kwargs["initial_prompt"] = " ".join(prompt_parts)[:400]
         try:
             segments, _ = model.transcribe(audio, **kwargs)
         except TypeError:
@@ -422,32 +445,33 @@ class App:
         segments = list(segments)
         text = "".join(seg.text for seg in segments).strip()
 
-        voice_cmds = self.cfg.get("voice_commands")
-        if voice_cmds and text:
-            from . import commands
-            if commands.is_undo(text):
-                n, self._last_typed_len = self._last_typed_len, 0
-                if n:
-                    self._backspace(n)
-                    self._log(f"Undid last {n} chars")
-                return  # nothing typed, nothing logged to history
-
-        resolved_cmd = None
-        if self.cfg.get("terminal_commands") and text and sys.platform not in ("win32", "darwin"):
-            from . import terminal_commands
-            resolved_cmd = terminal_commands.translate(text)
-
-        if resolved_cmd:
-            text = resolved_cmd  # bypass brain/punctuation -- it's a command, not prose
-        else:
-            if text and self._brain_active() and self.cfg.get("brain_autocorrect"):
-                try:
-                    text = self.brain.apply(text)
-                except Exception as e:
-                    self._log(f"brain apply failed: {e}")
+        if mode == "dictate":
+            voice_cmds = self.cfg.get("voice_commands")
             if voice_cmds and text:
                 from . import commands
-                text = commands.apply_punctuation(text)
+                if commands.is_undo(text):
+                    n, self._last_typed_len = self._last_typed_len, 0
+                    if n:
+                        self._backspace(n)
+                        self._log(f"Undid last {n} chars")
+                    return  # nothing typed, nothing logged to history
+
+            resolved_cmd = None
+            if self.cfg.get("terminal_commands") and text and sys.platform not in ("win32", "darwin"):
+                from . import terminal_commands
+                resolved_cmd = terminal_commands.translate(text)
+
+            if resolved_cmd:
+                text = resolved_cmd  # bypass brain/punctuation -- it's a command, not prose
+            else:
+                if text and self._brain_active() and self.cfg.get("brain_autocorrect"):
+                    try:
+                        text = self.brain.apply(text)
+                    except Exception as e:
+                        self._log(f"brain apply failed: {e}")
+                if voice_cmds and text:
+                    from . import commands
+                    text = commands.apply_punctuation(text)
 
         avg_logprob = no_speech_prob = compression_ratio = None
         if segments:
@@ -469,10 +493,30 @@ class App:
             self._log("(empty transcription)")
             return
         self._log(f"-> {text}")
-        self._type_text(text + " ")
-        self._last_typed_len = len(text) + 1
+
+        typed_text = text
+        if mode == "ask":
+            # `text` here is the spoken question -- keep it as-is for history
+            # and RAG (it's real dictation content), and type the generated
+            # answer instead, falling back to the raw question if Ollama
+            # isn't available.
+            context = self._rag_context_texts(
+                text, self.cfg.get("ask_context_limit", 5))
+            try:
+                from . import qna
+                ans = qna.answer(text, context, self.cfg.get("ask_model", "llama3.2"))
+            except Exception as e:
+                ans = None
+                self._log(f"qna failed: {e}")
+            if ans:
+                typed_text = ans
+            else:
+                self._log("qna unavailable, typing the raw question instead")
+
+        self._type_text(typed_text + " ")
+        self._last_typed_len = len(typed_text) + 1
         if self.feedback:
-            self.feedback.notify("omnihear", text, urgency="normal")
+            self.feedback.notify("omnihear", typed_text, urgency="normal")
         if self.db:
             try:
                 self.db.insert(text, duration, elapsed_ms, self.cfg["model"],
@@ -481,6 +525,7 @@ class App:
                                compression_ratio=compression_ratio)
             except Exception as e:
                 print(f"History write failed: {e}")
+        self._last_text = text
         try:
             from . import cloud
             cloud.track_activation()
@@ -494,24 +539,42 @@ class App:
         combo = parse_hotkey(self.cfg["hotkey"])
         self._kb_controller = keyboard.Controller()
 
+        ask_combo = None
+        ask_hotkey = self.cfg.get("ask_hotkey")
+        if ask_hotkey:
+            try:
+                ask_combo = parse_hotkey(ask_hotkey)
+            except ValueError as e:
+                print(f"omnihear: invalid ask_hotkey ({e}), voice Q&A disabled")
+            if ask_combo == combo:
+                print("omnihear: ask_hotkey matches hotkey, voice Q&A disabled")
+                ask_combo = None
+
         threading.Thread(target=self._worker_loop, daemon=True).start()
         threading.Thread(target=self._idle_unload_loop, daemon=True).start()
 
         pressed = set()
 
         def on_press(key):
-            if key in combo:
-                pressed.add(key)
-                if pressed == combo:
-                    self._start_recording()
+            if key not in combo and (ask_combo is None or key not in ask_combo):
+                return
+            pressed.add(key)
+            if pressed == combo:
+                self._start_recording("dictate")
+            elif ask_combo is not None and pressed == ask_combo:
+                self._start_recording("ask")
 
         def on_release(key):
-            if key in combo:
-                pressed.discard(key)
-                self._stop_recording()
+            if key not in combo and (ask_combo is None or key not in ask_combo):
+                return
+            pressed.discard(key)
+            self._stop_recording()
 
         print(f"Hold '{config_mod.hotkey_display(self.cfg['hotkey'])}' to "
               "record, release to transcribe & type. Ctrl+C to quit.")
+        if ask_combo is not None:
+            print(f"Hold '{config_mod.hotkey_display(ask_hotkey)}' to ask a "
+                  "question (voice Q&A, beta).")
         print("Model loads lazily on first press; first transcription "
               "after load takes a few extra seconds.")
         self._listener = keyboard.Listener(on_press=on_press, on_release=on_release)

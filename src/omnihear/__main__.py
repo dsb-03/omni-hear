@@ -62,6 +62,27 @@ def build_parser(cfg: dict) -> argparse.ArgumentParser:
     p.add_argument("--no-brain", dest="brain", action="store_false",
                    default=cfg["brain"],
                    help="Disable the Common Brain learning engine (beta).")
+    p.add_argument("--rag-context", dest="rag_context", action="store_true",
+                   default=cfg["rag_context"],
+                   help="Feed relevant past transcriptions (retrieved from "
+                        "history.db) to Whisper as extra initial_prompt "
+                        "context (beta).")
+    p.add_argument("--no-rag-context", dest="rag_context", action="store_false",
+                   help="Disable RAG context (default).")
+    p.add_argument("--rag-context-limit", type=int,
+                   default=cfg["rag_context_limit"],
+                   help="Max past transcriptions to feed as RAG context.")
+    p.add_argument("--ask-hotkey", default=cfg["ask_hotkey"],
+                   help="Optional second push-to-talk key/combo for voice "
+                        "Q&A (beta): hold, ask a question, release to get a "
+                        "locally-generated answer typed instead of the raw "
+                        "transcript. Empty disables it.")
+    p.add_argument("--ask-model", default=cfg["ask_model"],
+                   help="Ollama model name used to generate voice Q&A answers.")
+    p.add_argument("--ask-context-limit", type=int,
+                   default=cfg["ask_context_limit"],
+                   help="Max past transcriptions retrieved as context for "
+                        "voice Q&A.")
     p.add_argument("--analytics", dest="analytics", action="store_true",
                    default=cfg["analytics"],
                    help="Opt in to anonymous usage pings (version/platform "

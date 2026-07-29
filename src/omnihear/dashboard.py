@@ -1108,7 +1108,7 @@ const LANGUAGES = [['auto','Auto-detect Language']].concat(
 const COMPUTE_TYPES = ['int8','float16','int8_float16','float32'];
 const BOOLS = ['dashboard','notify','beep','history','verbose','vad_filter',
   'condition_on_previous_text','brain','brain_autocorrect','brain_hotwords','analytics',
-  'voice_commands','terminal_commands'];
+  'voice_commands','terminal_commands','rag_context'];
 const NUMBERS = {
   sample_rate: {min: 8000, step: 1000},
   beam_size: {min: 1, step: 1},
@@ -1119,10 +1119,13 @@ const NUMBERS = {
   log_prob_threshold: {min: -5, max: 0, step: 0.1},
   compression_ratio_threshold: {min: 1, max: 10, step: 0.1},
   brain_min_count: {min: 1, step: 1},
+  rag_context_limit: {min: 1, max: 20, step: 1},
+  ask_context_limit: {min: 1, max: 20, step: 1},
 };
 // Beta-only settings: rendered on #/beta, never in #/settings.
 const BETA_KEYS = ['brain','brain_autocorrect','brain_hotwords','brain_min_count','analytics',
-  'voice_commands','terminal_commands'];
+  'voice_commands','terminal_commands','rag_context','rag_context_limit',
+  'ask_hotkey','ask_model','ask_context_limit'];
 const SECTIONS = [
   ['Transcription Engine', ['model','language','device','compute_type','beam_size']],
   ['Input & Trigger', ['hotkey','sample_rate','min_duration','type_method']],
@@ -1161,6 +1164,11 @@ const HELP = {
   analytics: 'Opt-in anonymous usage pings (version and platform only — never audio or text).',
   voice_commands: 'Say punctuation words ("comma", "new line") to type symbols, and "scratch that" to undo the last thing typed.',
   terminal_commands: 'When a terminal is focused inside a git repo, translate phrases like "push to remote origin" into the real git command instead of typing them literally (Linux/X11 only).',
+  rag_context: 'Retrieve relevant past transcriptions (keyword search over history.db) and feed them to Whisper as extra initial_prompt context, alongside Common Brain’s vocabulary.',
+  rag_context_limit: 'Max past transcriptions to feed as RAG context.',
+  ask_hotkey: 'Second push-to-talk key/combo (e.g. "ctrl_l+space"): hold, ask a question, release to get a locally-generated answer typed instead of the raw transcript. Empty disables it. Requires Ollama installed locally.',
+  ask_model: 'Ollama model name used to generate voice Q&A answers (e.g. "llama3.2"). Ollama must be installed and the model pulled locally.',
+  ask_context_limit: 'Max past transcriptions retrieved as context for voice Q&A.',
 };
 const pretty = k => k.replace(/_/g, ' ');
 const keyDisplay = hk => String(hk).split('+').filter(Boolean)
