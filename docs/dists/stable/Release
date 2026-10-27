@@ -1,24 +1,24 @@
 Architectures: amd64
 Codename: stable
 Components: main
-Date: Wed, 29 Jul 2026 15:30:24 +0000
+Date: Tue, 27 Oct 2026 05:03:43 +0000
 Description: omnihear APT repository
 Label: omnihear
 Origin: omnihear
 Suite: stable
 MD5Sum:
- c94dcc4d73950f04387c3d59c3b87be2              177 Release
- c021333b021bfe6075880a86cfc57b44             7346 main/binary-amd64/Packages
- e2713caf13614d98a140d3aeafcfae16             1453 main/binary-amd64/Packages.gz
+ ffb817940d123b8a07ea7b971f23005b              177 Release
+ 996d45758d6b97525b913c8309f226da             8363 main/binary-amd64/Packages
+ f841824ad755bc59975f2c66b1799196             1720 main/binary-amd64/Packages.gz
 SHA1:
- 48cda61fcc7124f3f6321983f4ddace195a0fec4              177 Release
- 0f8c893ef4bff4a7bca357f6f78d2644aefe4d61             7346 main/binary-amd64/Packages
- dfdb3466462db55518b02b0e8e66f073507f898f             1453 main/binary-amd64/Packages.gz
+ 5d610eb8e744e0126921a064d6d1aeff12f82d71              177 Release
+ b2ff90518b67191e89840ecab3d38c08998ea9df             8363 main/binary-amd64/Packages
+ 4db5c39ef29ca893f74b4e9f638c2a89fb6e636e             1720 main/binary-amd64/Packages.gz
 SHA256:
- 95397460baaee84206f890448e1e2cd5c0dd3b7fb09f24d46d9a9005f1811d5d              177 Release
- 08efe8f8074c55e3b857801451ef15e48b3178efb615ac8a034b7f3be5dbfc0d             7346 main/binary-amd64/Packages
- ff8ebbfdce432089d950d74deef58ca132425e5d91896d57d70e0ccebee02ab3             1453 main/binary-amd64/Packages.gz
+ 12200601ddaf4002f413223d16698cef72ebe1cd76f01172f3ce2cfa6c732b5e              177 Release
+ ae89a06db42c16ee43291f6dac313ac2d1a0f723e0092d6f60ff47b5e739b08a             8363 main/binary-amd64/Packages
+ 3af28fae0601e78bd620a24655b94277f26f151ce0fb4a58639cf313d70e02e1             1720 main/binary-amd64/Packages.gz
 SHA512:
- 22b3d0e55e8ca86fd9792f7e967afa4a8aeec18a566a57ff02d9d2d0431b9e144d5f5da2bc4a976e5ac25e9821fe09d9073f8e8c2055e445754032122b755412              177 Release
- d49e732d6367b2be6ff8578a213276e896e68cf4f92218af1c189fa2ac6c9afc7d1cb08c6bbea95408ee3cecab725e7ca9be4adb92eaaab667389d57a299f97a             7346 main/binary-amd64/Packages
- e38c7d67aeab20249bf739fd16696280e573f3333e1e00eb033b6dda4aabdd36bd692936976858791491af17a03b2e3387f7c712f69926651d1efff3f13ea7a8             1453 main/binary-amd64/Packages.gz
+ aab936162ced851a4173ed4025efc18eeb252ef592a9ceefff3241b67dc8a0456a9180771287eafcd682ac7bb2bd3ebf402532b98711df9081b6efbe258f5d0c              177 Release
+ 341ff9815f975ee6962b39de9797523eb129df5e0d01ff31003f358e15428eee806303010def0ff2fe60a9dcf0b789c0c57701958c47450355a0d0338d163dc8             8363 main/binary-amd64/Packages
+ b381a2e890cd00b932782e45826a8546730439eb14d7fd777a617c85b4d8a1ae33fc159f4408005cd5f6aa154915d0d539d0e312884bd7f863e4d1ff854bedfe             1720 main/binary-amd64/Packages.gz
