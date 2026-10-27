@@ -184,6 +184,9 @@ class App:
         self._verbose = bool(cfg.get("verbose"))
         self._overlay = None
         self._listener = None
+        self._kb_controller = None
+        # Resolved at run() so Wayland can remap pynput/auto -> ydotool/wtype.
+        self._type_method = cfg.get("type_method") or "auto"
         # macOS can't use the Tk overlay (Cocoa GUI must own the main thread,
         # which the menu-bar tray takes) — use the native AppKit panel instead,
         # which also shows a distinct "transcribing" state.
@@ -250,24 +253,26 @@ class App:
 
     # -- typing -------------------------------------------------------
     def _type_text(self, text):
-        if self.cfg["type_method"] == "xdotool":
-            import subprocess
-            subprocess.run(["xdotool", "type", "--clearmodifiers", "--", text])
-        else:
-            self._kb_controller.type(text)
+        method = self._type_method
+        if method in ("xdotool", "ydotool", "wtype"):
+            from . import linux_session
+            linux_session.type_text(method, text)
+            return
+        self._kb_controller.type(text)
 
     def _backspace(self, n):
         """Erase the last n characters typed via _type_text."""
         if n <= 0:
             return
-        if self.cfg["type_method"] == "xdotool":
-            import subprocess
-            subprocess.run(["xdotool", "key", "--repeat", str(n), "BackSpace"])
-        else:
-            from pynput.keyboard import Key
-            for _ in range(n):
-                self._kb_controller.press(Key.backspace)
-                self._kb_controller.release(Key.backspace)
+        method = self._type_method
+        if method in ("xdotool", "ydotool", "wtype"):
+            from . import linux_session
+            linux_session.backspace(method, n)
+            return
+        from pynput.keyboard import Key
+        for _ in range(n):
+            self._kb_controller.press(Key.backspace)
+            self._kb_controller.release(Key.backspace)
 
     @staticmethod
     def _clean_audio(audio):
@@ -457,9 +462,12 @@ class App:
                     return  # nothing typed, nothing logged to history
 
             resolved_cmd = None
-            if self.cfg.get("terminal_commands") and text and sys.platform not in ("win32", "darwin"):
-                from . import terminal_commands
-                resolved_cmd = terminal_commands.translate(text)
+            if (self.cfg.get("terminal_commands") and text
+                    and sys.platform not in ("win32", "darwin")):
+                from . import linux_session, terminal_commands
+                # xdotool window/cwd probes — X11 only.
+                if not linux_session.is_wayland():
+                    resolved_cmd = terminal_commands.translate(text)
 
             if resolved_cmd:
                 text = resolved_cmd  # bypass brain/punctuation -- it's a command, not prose
@@ -534,13 +542,49 @@ class App:
 
     # -- main loop -----------------------------------------------------
     def run(self):
+        from . import linux_session
+
+        configured_type = self.cfg.get("type_method") or "auto"
+        self._type_method = linux_session.resolve_type_method(configured_type)
+        if (sys.platform not in ("win32", "darwin")
+                and self._type_method != configured_type):
+            print(f"omnihear: using type_method={self._type_method} "
+                  f"(config had {configured_type!r}, "
+                  f"session={linux_session.session_type()})")
+
+        if linux_session.is_wayland():
+            for hint in linux_session.missing_wayland_deps(
+                    self.cfg.get("type_method") or "auto"):
+                print(f"omnihear: Wayland setup: {hint}")
+            if self.cfg.get("terminal_commands"):
+                print("omnihear: terminal_commands needs X11/xdotool — "
+                      "disabled on Wayland")
+
+        ask_hotkey = self.cfg.get("ask_hotkey") or ""
+        threading.Thread(target=self._worker_loop, daemon=True).start()
+        threading.Thread(target=self._idle_unload_loop, daemon=True).start()
+
+        print(f"Hold '{config_mod.hotkey_display(self.cfg['hotkey'])}' to "
+              "record, release to transcribe & type. Ctrl+C to quit.")
+        if ask_hotkey:
+            print(f"Hold '{config_mod.hotkey_display(ask_hotkey)}' to ask a "
+                  "question (voice Q&A, beta).")
+        print("Model loads lazily on first press; first transcription "
+              "after load takes a few extra seconds.")
+
+        if linux_session.is_wayland():
+            self._run_evdev(ask_hotkey)
+        else:
+            self._run_pynput(ask_hotkey)
+
+    def _run_pynput(self, ask_hotkey: str):
         from pynput import keyboard
 
         combo = parse_hotkey(self.cfg["hotkey"])
-        self._kb_controller = keyboard.Controller()
+        if self._type_method == "pynput":
+            self._kb_controller = keyboard.Controller()
 
         ask_combo = None
-        ask_hotkey = self.cfg.get("ask_hotkey")
         if ask_hotkey:
             try:
                 ask_combo = parse_hotkey(ask_hotkey)
@@ -549,9 +593,6 @@ class App:
             if ask_combo == combo:
                 print("omnihear: ask_hotkey matches hotkey, voice Q&A disabled")
                 ask_combo = None
-
-        threading.Thread(target=self._worker_loop, daemon=True).start()
-        threading.Thread(target=self._idle_unload_loop, daemon=True).start()
 
         pressed = set()
 
@@ -570,16 +611,44 @@ class App:
             pressed.discard(key)
             self._stop_recording()
 
-        print(f"Hold '{config_mod.hotkey_display(self.cfg['hotkey'])}' to "
-              "record, release to transcribe & type. Ctrl+C to quit.")
-        if ask_combo is not None:
-            print(f"Hold '{config_mod.hotkey_display(ask_hotkey)}' to ask a "
-                  "question (voice Q&A, beta).")
-        print("Model loads lazily on first press; first transcription "
-              "after load takes a few extra seconds.")
         self._listener = keyboard.Listener(on_press=on_press, on_release=on_release)
         with self._listener as listener:
             listener.join()
+
+    def _run_evdev(self, ask_hotkey: str):
+        from . import evdev_hotkey
+
+        try:
+            combo = evdev_hotkey.parse_hotkey_codes(self.cfg["hotkey"])
+        except ValueError as e:
+            raise SystemExit(f"omnihear: invalid hotkey for Wayland: {e}") from e
+
+        ask_combo = None
+        if ask_hotkey:
+            try:
+                ask_combo = evdev_hotkey.parse_hotkey_codes(ask_hotkey)
+            except ValueError as e:
+                print(f"omnihear: invalid ask_hotkey ({e}), voice Q&A disabled")
+            if ask_combo == combo:
+                print("omnihear: ask_hotkey matches hotkey, voice Q&A disabled")
+                ask_combo = None
+
+        monitor = evdev_hotkey.HotkeyMonitor(
+            combo,
+            on_dictate_start=lambda: self._start_recording("dictate"),
+            on_stop=self._stop_recording,
+            ask_combo=ask_combo,
+            on_ask_start=(lambda: self._start_recording("ask")) if ask_combo else None,
+        )
+        self._listener = monitor
+        with monitor:
+            # Keep the main thread alive so Ctrl+C works; the monitor
+            # thread owns the select() loop.
+            try:
+                while monitor._thread is not None and monitor._thread.is_alive():
+                    monitor._thread.join(timeout=0.5)
+            except KeyboardInterrupt:
+                monitor.stop()
 
     def stop(self):
         if self._listener is not None:

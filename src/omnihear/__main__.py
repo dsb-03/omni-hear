@@ -10,7 +10,7 @@ from .app import SPECIAL_KEY_NAMES
 def build_parser(cfg: dict) -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="omnihear",
-        description="Push-to-talk local Whisper transcription (Linux/X11, Windows, macOS).",
+        description="Push-to-talk local Whisper transcription (Linux X11/Wayland, Windows, macOS).",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     p.add_argument("--model", default=cfg["model"],
@@ -27,8 +27,10 @@ def build_parser(cfg: dict) -> argparse.ArgumentParser:
     p.add_argument("--sample-rate", type=int, default=cfg["sample_rate"],
                    help="Audio sample rate in Hz.")
     p.add_argument("--type-method", default=cfg["type_method"],
-                   choices=["pynput", "xdotool"],
-                   help="How to inject transcribed text into the focused field.")
+                   choices=["auto", "pynput", "xdotool", "ydotool", "wtype"],
+                   help="How to inject transcribed text into the focused field. "
+                        "'auto' picks pynput on X11/Windows/macOS, and "
+                        "ydotool/wtype on Wayland.")
     p.add_argument("--language", default=cfg["language"],
                    help="Language code for transcription.")
     p.add_argument("--beam-size", type=int, default=cfg["beam_size"],

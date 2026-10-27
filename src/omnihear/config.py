@@ -102,7 +102,7 @@ DEFAULTS = {
     "compute_type": "int8",
     "hotkey": "ctrl_r",
     "sample_rate": 16000,
-    "type_method": "pynput",
+    "type_method": "auto",
     "language": "en",
     "beam_size": 1,
     "min_duration": 0.3,
@@ -228,13 +228,33 @@ def validate_updates(updates: dict) -> tuple[dict, list[str]]:
     if "device" in clean and clean["device"] not in ("cpu", "cuda"):
         errors.append("device must be cpu or cuda")
         del clean["device"]
-    if "type_method" in clean and clean["type_method"] not in ("pynput", "xdotool"):
-        errors.append("type_method must be pynput or xdotool")
+    _TYPE_METHODS = ("auto", "pynput", "xdotool", "ydotool", "wtype")
+    if "type_method" in clean and clean["type_method"] not in _TYPE_METHODS:
+        errors.append("type_method must be one of: " + ", ".join(_TYPE_METHODS))
+        del clean["type_method"]
+    if ("type_method" in clean and clean["type_method"] in ("xdotool", "ydotool", "wtype")
+            and sys.platform in ("win32", "darwin")):
+        errors.append(f"type_method '{clean['type_method']}' is only supported on Linux")
         del clean["type_method"]
     if ("type_method" in clean and clean["type_method"] == "xdotool"
-            and sys.platform in ("win32", "darwin")):
-        errors.append("type_method 'xdotool' is only supported on X11 (Linux)")
-        del clean["type_method"]
+            and sys.platform not in ("win32", "darwin")):
+        try:
+            from . import linux_session
+            if linux_session.is_wayland():
+                errors.append("type_method 'xdotool' requires an X11 session "
+                              "(use auto, ydotool, or wtype on Wayland)")
+                del clean["type_method"]
+        except Exception:
+            pass
+    if ("terminal_commands" in clean and clean["terminal_commands"]
+            and sys.platform not in ("win32", "darwin")):
+        try:
+            from . import linux_session
+            if linux_session.is_wayland():
+                errors.append("terminal_commands is only supported on X11 (Linux)")
+                del clean["terminal_commands"]
+        except Exception:
+            pass
     if "language" in clean:
         lang = clean["language"].strip().lower()
         if lang in ("", "auto") or lang in LANGUAGE_NAMES:
