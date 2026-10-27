@@ -1,6 +1,7 @@
 # omnihear
 
-Push-to-talk local Whisper transcription for Linux (X11), Windows, and macOS.
+Push-to-talk local Whisper transcription for Linux (X11 and Wayland),
+Windows, and macOS.
 
 Hold a hotkey, speak, release — your speech is transcribed locally with
 [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (no cloud, no
@@ -55,7 +56,8 @@ omnihear --write-config
 Keys mirror the CLI flags (`model`, `hotkey`, `device`, `compute_type`,
 `language`, `beam_size`, `min_duration`, `input_device`, `type_method`,
 `sample_rate`) plus `dashboard`, `dashboard_port`, `notify`, `beep`,
-`history`, and `idle_unload_minutes`.
+`history`, and `idle_unload_minutes`. `type_method` defaults to `auto`
+(pynput on X11/Windows/macOS; ydotool or wtype on Wayland).
 
 ## Running as a service
 
@@ -159,10 +161,35 @@ in hotkeys (e.g. `cmd_r`). Config lives at
 > Monitoring after each app update. Developer-ID signing (see SETUP.md) makes
 > the grants stick.
 
+## Wayland (Linux)
+
+Wayland cannot use X11 global grabs or `xdotool`, so omnihear switches
+backends automatically when `XDG_SESSION_TYPE=wayland`:
+
+1. **Hotkeys** — reads `/dev/input/event*` directly. Your user must be in
+   the `input` group:
+
+   ```bash
+   sudo usermod -aG input $USER
+   # then log out and back in
+   ```
+
+2. **Text injection** — install one of:
+
+   ```bash
+   sudo apt install ydotool          # any compositor (GNOME/KDE/wlroots)
+   systemctl --user enable --now ydotoold
+
+   # or, on wlroots compositors (sway, hyprland, …):
+   sudo apt install wtype
+   ```
+
+`type_method = "auto"` (the default) picks `ydotool` or `wtype` when
+present. Force one with `--type-method ydotool` / `wtype`.
+
 ## Requirements
 
-- **Linux:** X11 session (Wayland not currently supported — global hotkeys and
-  synthetic keystroke injection work differently there)
+- **Linux:** X11 or Wayland (see Wayland section above for the extra setup)
 - **Windows:** via the installer above
 - **macOS:** Apple Silicon (arm64), macOS 11+
 - A microphone
