@@ -245,6 +245,9 @@ class App:
         self._stream = None
         self._last_typed_len = 0
         self._last_text = ""  # most recent transcript, seeds RAG context lookups
+        self._last_inserted = ""  # last text put at the cursor (paste-last hotkey)
+        self._last_rms = 0.0      # live mic level while recording (dashboard meter)
+        self._locked = False      # hands-free: recording continues without holding
         self._verbose = bool(cfg.get("verbose"))
         self._overlay = None
         self._listener = None
@@ -272,12 +275,25 @@ class App:
 
     # -- status for the dashboard ------------------------------------
     def status(self) -> dict:
+        from .overlay_anim import level_from_rms
+        ask = self.cfg.get("ask_hotkey") or ""
+        paste_last = self.cfg.get("paste_last_hotkey") or ""
         return {
             "model": self.cfg["model"],
             "hotkey": self.cfg["hotkey"],
             "hotkey_display": config_mod.hotkey_display(self.cfg["hotkey"]),
+            "ask_hotkey_display": config_mod.hotkey_display(ask) if ask else "",
+            "paste_last_hotkey_display": (config_mod.hotkey_display(paste_last)
+                                          if paste_last else ""),
             "model_loaded": self._model is not None,
             "recording": self._recording,
+            "recording_mode": self._recording_mode if self._recording else "",
+            "locked": self._locked,
+            "hands_free": bool(self.cfg.get("hands_free")),
+            # 0..1 live mic level while recording (same scale as the overlay)
+            "level": level_from_rms(self._last_rms) if self._recording else 0.0,
+            "type_method": self._type_method,
+            "cleanup": self.cfg.get("cleanup", "off"),
         }
 
     def _brain_active(self) -> bool:
@@ -318,6 +334,13 @@ class App:
                     gc.collect()
 
     # -- typing -------------------------------------------------------
+    def _insert(self, text):
+        """Put text at the cursor. Single entry point for every insertion
+        (dictation, Q&A answers, paste-last), so insertion strategy
+        (typing vs. clipboard paste) lives in one place."""
+        self._type_text(text)
+        self._last_inserted = text
+
     def _type_text(self, text):
         method = self._type_method
         if method in linux_session_methods():
@@ -361,13 +384,19 @@ class App:
         if status:
             print(status)
         self._audio_q.put(indata.copy())
+        # Block RMS drives the overlay's live waveform and the dashboard's
+        # mic meter. Cheap (one pass over a few hundred samples) and never
+        # allowed to break capture.
+        try:
+            import numpy as np
+            rms = float(np.sqrt(np.mean(np.square(indata))))
+        except Exception:
+            return
+        self._last_rms = rms
         set_level = self._overlay_level
         if set_level is not None:
-            # Block RMS drives the overlay's live waveform. Cheap (one pass
-            # over a few hundred samples) and never allowed to break capture.
             try:
-                import numpy as np
-                set_level(float(np.sqrt(np.mean(np.square(indata)))))
+                set_level(rms)
             except Exception:
                 pass
 
@@ -596,7 +625,7 @@ class App:
             else:
                 self._log("qna unavailable, typing the raw question instead")
 
-        self._type_text(typed_text + " ")
+        self._insert(typed_text + " ")
         self._last_typed_len = len(typed_text) + 1
         if self.feedback:
             self.feedback.notify("omnihear", typed_text, urgency="normal")

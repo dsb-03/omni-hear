@@ -36,7 +36,13 @@ KEY_DISPLAY_NAMES = {
 # (/dev/uinput, any compositor); xdotool is X11; ydotool/wtype are external
 # Wayland tools. Linux-only ones are rejected on Windows/macOS.
 LINUX_TYPE_METHODS = ("uinput", "xdotool", "ydotool", "wtype")
-TYPE_METHODS = ("auto", "pynput") + LINUX_TYPE_METHODS
+# "paste" (beta, all platforms): put the text on the clipboard and send the
+# paste shortcut through the auto-selected key backend, then restore the
+# previous clipboard. Falls back to typing if the clipboard is unavailable.
+TYPE_METHODS = ("auto", "pynput", "paste") + LINUX_TYPE_METHODS
+
+# Text cleanup levels applied to dictation (see cleanup.py).
+CLEANUP_LEVELS = ("off", "light")
 
 
 def hotkey_display(name: str) -> str:
@@ -108,6 +114,9 @@ DEFAULTS = {
     "device": "cpu",
     "compute_type": "int8",
     "hotkey": "ctrl_r",
+    "hands_free": False,
+    "max_recording_seconds": 300,
+    "paste_last_hotkey": "",
     "sample_rate": 16000,
     "type_method": "auto",
     "language": "en",
@@ -132,6 +141,7 @@ DEFAULTS = {
     "brain_min_count": 2,
     "analytics": False,
     "voice_commands": False,
+    "cleanup": "off",
     "terminal_commands": False,
     "rag_context": False,
     "rag_context_limit": 3,
@@ -277,6 +287,29 @@ def validate_updates(updates: dict) -> tuple[dict, list[str]]:
             errors.append("hotkey must be known key names or single characters, "
                           "joined with '+' for combos")
             del clean["hotkey"]
+    if "paste_last_hotkey" in clean:
+        v = clean["paste_last_hotkey"].strip()
+        if not v:
+            clean["paste_last_hotkey"] = ""  # empty disables it
+        else:
+            hk = validate_hotkey(v)
+            if hk:
+                clean["paste_last_hotkey"] = hk
+            else:
+                errors.append("paste_last_hotkey must be known key names or "
+                              "single characters, joined with '+' for combos")
+                del clean["paste_last_hotkey"]
+    if "cleanup" in clean:
+        lvl = clean["cleanup"].strip().lower()
+        if lvl in CLEANUP_LEVELS:
+            clean["cleanup"] = lvl
+        else:
+            errors.append("cleanup must be one of: " + ", ".join(CLEANUP_LEVELS))
+            del clean["cleanup"]
+    if ("max_recording_seconds" in clean
+            and not 10 <= clean["max_recording_seconds"] <= 3600):
+        errors.append("max_recording_seconds must be between 10 and 3600")
+        del clean["max_recording_seconds"]
     if "ask_hotkey" in clean:
         v = clean["ask_hotkey"].strip()
         if not v:

@@ -1103,12 +1103,13 @@ const KEY_NAMES = __KEY_NAMES__;
 const MODELS = __MODELS__;
 const LANGUAGE_NAMES = __LANGS__;
 const TYPE_METHODS = __TYPE_METHODS__;
+const CLEANUP_LEVELS = __CLEANUP_LEVELS__;
 const LANGUAGES = [['auto','Auto-detect Language']].concat(
   Object.entries(LANGUAGE_NAMES).map(([c,n]) => [c, `${n} (${c})`]));
 const COMPUTE_TYPES = ['int8','float16','int8_float16','float32'];
 const BOOLS = ['dashboard','notify','beep','history','verbose','vad_filter',
   'condition_on_previous_text','brain','brain_autocorrect','brain_hotwords','analytics',
-  'voice_commands','terminal_commands','rag_context'];
+  'voice_commands','terminal_commands','rag_context','hands_free'];
 const NUMBERS = {
   sample_rate: {min: 8000, step: 1000},
   beam_size: {min: 1, step: 1},
@@ -1121,6 +1122,7 @@ const NUMBERS = {
   brain_min_count: {min: 1, step: 1},
   rag_context_limit: {min: 1, max: 20, step: 1},
   ask_context_limit: {min: 1, max: 20, step: 1},
+  max_recording_seconds: {min: 10, max: 3600, step: 10},
 };
 // Beta-only settings: rendered on #/beta, never in #/settings.
 const BETA_KEYS = ['brain','brain_autocorrect','brain_hotwords','brain_min_count','analytics',
@@ -1129,6 +1131,7 @@ const BETA_KEYS = ['brain','brain_autocorrect','brain_hotwords','brain_min_count
 const SECTIONS = [
   ['Transcription Engine', ['model','language','device','compute_type','beam_size']],
   ['Input & Trigger', ['hotkey','sample_rate','min_duration','type_method']],
+  ['Dictation (new)', ['hands_free','max_recording_seconds','paste_last_hotkey','cleanup']],
   ['Hallucination Filtering', ['vad_filter','no_speech_threshold',
     'log_prob_threshold','compression_ratio_threshold','condition_on_previous_text']],
   ['Dashboard & SQLite DB', ['dashboard','dashboard_port','history']],
@@ -1144,7 +1147,11 @@ const HELP = {
   hotkey: 'Key (or +-combo) to hold down to record. Release to transcribe and type.',
   sample_rate: 'Microphone recording sample rate in Hz.',
   min_duration: 'Ignore recordings shorter than this many seconds (avoids accidental taps).',
-  type_method: 'How transcribed text is typed into the focused field. auto picks pynput on X11/Windows/macOS; on Wayland the built-in uinput typer (any compositor), else ydotool, or wtype on wlroots.',
+  type_method: 'How transcribed text is typed into the focused field. auto picks pynput on X11/Windows/macOS; on Wayland the built-in uinput typer (any compositor), else ydotool, or wtype on wlroots. paste (beta) pastes through the clipboard: instant for long text and works with any keyboard layout; your previous clipboard is restored.',
+  hands_free: 'Beta. Double-tap the hotkey to keep recording without holding it; tap once more to stop and transcribe.',
+  max_recording_seconds: 'Safety cap: recording stops and is transcribed after this many seconds (hands-free or held).',
+  paste_last_hotkey: 'Optional key/combo that puts your last transcript at the cursor again, for when it went to the wrong window. Empty disables it.',
+  cleanup: 'Beta. light: remove filler words (um, uh), stutters ("the the") and spoken self-corrections ("at 2, actually 3" becomes "at 3") before typing.',
   vad_filter: 'Trim silence/noise before transcription using Silero VAD. Reduces hallucinated text on quiet clips.',
   no_speech_threshold: 'Segments with a no-speech probability above this are treated as silence, not text.',
   log_prob_threshold: 'Segments whose average log-probability falls below this are considered low-confidence.',
@@ -1197,6 +1204,7 @@ function fieldHtml(k, v) {
            `<span>${pretty(k)}</span><div class="switch-slider"></div></label>`;
   if (k === 'device') return selectOf(k, ['cpu','cuda'], v);
   if (k === 'type_method') return selectOf(k, TYPE_METHODS, v);
+  if (k === 'cleanup') return selectOf(k, CLEANUP_LEVELS, v);
   if (k === 'compute_type') return selectOf(k, COMPUTE_TYPES, v);
   if (k === 'model')
     return customSelect(k,
@@ -1505,8 +1513,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
                              json.dumps(config_mod.MODEL_NAMES))
                     .replace("__LANGS__",
                              json.dumps(config_mod.LANGUAGE_NAMES))
+                    .replace("__CLEANUP_LEVELS__",
+                             json.dumps(list(config_mod.CLEANUP_LEVELS)))
                     .replace("__TYPE_METHODS__",
-                             json.dumps(["auto", "pynput"]
+                             json.dumps(["auto", "pynput", "paste"]
                                         if sys.platform in ("win32", "darwin")
                                         else list(config_mod.TYPE_METHODS))))
             self._send(200, page.encode(), "text/html; charset=utf-8")
@@ -1695,9 +1705,11 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._send(404, {"error": "not found"})
 
 
-def start_dashboard(db, status_fn, port: int = 4738, brain=None):
+def start_dashboard(db, status_fn, port: int = 4738, brain=None, cfg=None):
     """Start the dashboard server on 127.0.0.1 in a daemon thread.
 
+    cfg is the running process's effective config (CLI flags applied), for
+    endpoints that report on the live setup; None falls back to the file.
     Returns the server, or None if the port could not be bound.
     """
     try:
@@ -1709,6 +1721,7 @@ def start_dashboard(db, status_fn, port: int = 4738, brain=None):
     server.db = db
     server.status_fn = status_fn
     server.brain = brain
+    server.cfg = cfg
     threading.Thread(target=server.serve_forever, daemon=True).start()
     print(f"omnihear: dashboard at http://127.0.0.1:{port}")
     return server
