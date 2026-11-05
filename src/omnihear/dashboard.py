@@ -797,6 +797,11 @@ const $ = s => document.querySelector(s);
 const esc = s => String(s).replace(/[&<>"]/g,
   c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const api = (p, opts) => fetch(p, opts).then(r => r.json());
+// Send every POST through post(): the server refuses POSTs that aren't
+// application/json (CSRF protection), so the header must never be left off.
+const post = (p, body) => api(p, { method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: body === undefined ? undefined : JSON.stringify(body) });
 
 // --- Theme Management ---
 const effectiveTheme = () => document.documentElement.dataset.theme ||
@@ -907,7 +912,7 @@ const PERM_LABELS = {
   microphone: ['Microphone', 'record audio'],
 };
 async function openPermPane(name) {
-  try { await api('/api/open-settings', { method: 'POST', body: JSON.stringify({ name }) }); }
+  try { await post('/api/open-settings', { name }); }
   catch (e) {}
 }
 function renderPermBanner(perms) {
@@ -1080,8 +1085,7 @@ async function openLog(offset, q, total) {
     `</div>`
   ).join('');
   $('#log-corr-save').onclick = async () => {
-    const res = await api('/api/correction', { method: 'POST',
-      body: JSON.stringify({ id: r.id, text: $('#log-corr').value }) });
+    const res = await post('/api/correction', { id: r.id, text: $('#log-corr').value });
     const m = $('#log-corr-msg');
     if (res.ok) {
       m.textContent = res.learned && res.learned.length
@@ -1318,11 +1322,7 @@ async function saveConfig() {
       data[k] = el.value === '__custom__' ? $('#' + k + '-custom').value : el.value;
     else data[k] = el.value;
   }
-  const res = await api('/api/config', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data)
-  });
+  const res = await post('/api/config', data);
   if (res.errors && res.errors.length)
     showMsg('Errors: ' + res.errors.join('; '), false);
   else
@@ -1333,7 +1333,7 @@ $('#cfg').addEventListener('submit', e => { e.preventDefault(); saveConfig(); })
 $('#save').addEventListener('click', e => { e.preventDefault(); saveConfig(); });
 
 $('#restart').addEventListener('click', async () => {
-  const res = await api('/api/restart', { method: 'POST' });
+  const res = await post('/api/restart');
   showMsg(res.message, false);
 });
 
@@ -1349,7 +1349,7 @@ async function loadBeta() {
       `<span class="hotkey-badge">${st.beta_access ? 'BETA ACTIVE' : 'NO BETA ACCESS'}</span>` +
       `<span style="flex:1"></span>` +
       `<button class="action" id="beta-logout" type="button">Sign out</button></div>`;
-    $('#beta-logout').onclick = async () => { await api('/api/auth/logout', {method:'POST'}); loadBeta(); };
+    $('#beta-logout').onclick = async () => { await post('/api/auth/logout'); loadBeta(); };
   } else {
     auth.innerHTML =
       `<div class="cfg-grid">` +
@@ -1360,8 +1360,8 @@ async function loadBeta() {
       `<span id="auth-msg" style="font-size:13px;"></span></div>`;
     const doAuth = async path => {
       $('#auth-msg').textContent = '…';
-      const res = await api(path, { method: 'POST', body: JSON.stringify(
-        { email: $('#auth-email').value.trim(), password: $('#auth-pw').value }) });
+      const res = await post(path,
+        { email: $('#auth-email').value.trim(), password: $('#auth-pw').value });
       if (res.error) $('#auth-msg').textContent = res.error;
       else if (res.confirm_email) $('#auth-msg').textContent = 'Check your email to confirm, then sign in.';
       else loadBeta();
@@ -1397,13 +1397,13 @@ async function loadBeta() {
 
 function betaMsg(sel, text) { const m = $(sel); m.textContent = text; setTimeout(() => { m.textContent = ''; }, 4000); }
 
-async function betaDelWord(w) { await api('/api/brain/word', {method:'POST', body: JSON.stringify({word: w, delete: true})}); loadBeta(); }
-async function betaDelCorr(id) { await api('/api/brain/correction-delete', {method:'POST', body: JSON.stringify({id})}); loadBeta(); }
+async function betaDelWord(w) { await post('/api/brain/word', {word: w, delete: true}); loadBeta(); }
+async function betaDelCorr(id) { await post('/api/brain/correction-delete', {id}); loadBeta(); }
 
 $('#brain-add-btn').addEventListener('click', async () => {
   const w = $('#brain-add-word').value.trim();
   if (!w) return;
-  await api('/api/brain/word', {method:'POST', body: JSON.stringify({word: w})});
+  await post('/api/brain/word', {word: w});
   $('#brain-add-word').value = '';
   loadBeta();
 });
@@ -1416,8 +1416,7 @@ $('#beta-save').addEventListener('click', async () => {
     if (!el) continue;
     data[k] = BOOLS.includes(k) ? el.checked : el.value;
   }
-  const res = await api('/api/config', {method:'POST',
-    headers: {'Content-Type':'application/json'}, body: JSON.stringify(data)});
+  const res = await post('/api/config', data);
   betaMsg('#beta-msg', res.errors && res.errors.length ? 'Errors: ' + res.errors.join('; ')
     : '✓ Saved — restart omnihear to apply.');
 });
@@ -1425,9 +1424,9 @@ $('#beta-save').addEventListener('click', async () => {
 $('#fb-send').addEventListener('click', async () => {
   const title = $('#fb-title').value.trim(), body = $('#fb-body').value.trim();
   if (!title || !body) { betaMsg('#fb-msg', 'Title and details are required.'); return; }
-  const res = await api('/api/feedback', {method:'POST', body: JSON.stringify({
+  const res = await post('/api/feedback', {
     kind: $('#fb-kind').value, title, body,
-    include_diagnostics: $('#fb-diag').checked})});
+    include_diagnostics: $('#fb-diag').checked});
   if (res.ok) { betaMsg('#fb-msg', '✓ Thanks — feedback sent!'); $('#fb-title').value = ''; $('#fb-body').value = ''; }
   else betaMsg('#fb-msg', res.error || 'Failed to send.');
 });
@@ -1468,6 +1467,11 @@ def _auth_error(e: Exception) -> str:
     return str(e) or "network error"
 
 
+# The only names the dashboard answers to. A Host or Origin naming anything
+# else is another website (CSRF) or a DNS-rebinding attack on 127.0.0.1.
+_LOCAL_HOSTNAMES = ("127.0.0.1", "localhost")
+
+
 class DashboardHandler(BaseHTTPRequestHandler):
     # set on the server: server.db, server.effective_config, server.status_fn
 
@@ -1493,7 +1497,49 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._send(400, {"error": "invalid JSON body"})
             return None
 
+    def _request_allowed(self) -> bool:
+        """Refuse requests that didn't come from the dashboard page itself.
+
+        - Host must name this server: a domain DNS-rebound to 127.0.0.1 is
+          otherwise same-origin with this API and can read transcripts.
+        - POST must be application/json: a browser only sends that
+          cross-origin after a CORS preflight, which this server never
+          approves. Origin, when sent, must be this server, and
+          Sec-Fetch-Site must be same-origin or none.
+        - GET /api/* is refused when Sec-Fetch-Site says another site sent
+          it (stops cross-site probing); following a link to the page works.
+
+        Sends a 403 and returns False when the request is refused.
+        """
+        port = self.server.server_port
+        hosts = {f"{name}:{port}" for name in _LOCAL_HOSTNAMES}
+        if port == 80:  # default port: browsers leave it out of Host/Origin
+            hosts.update(_LOCAL_HOSTNAMES)
+        host = (self.headers.get("Host") or "").strip().lower()
+        origin = self.headers.get("Origin")
+        site = (self.headers.get("Sec-Fetch-Site") or "").strip().lower()
+        cross_site = site not in ("", "same-origin", "none")
+        reason = None
+        if host not in hosts:
+            reason = f"unexpected Host header (open http://127.0.0.1:{port}/)"
+        elif self.command == "POST":
+            if self.headers.get_content_type() != "application/json":
+                reason = "Content-Type must be application/json"
+            elif (origin is not None and origin.strip().lower()
+                    not in {"http://" + h for h in hosts}):
+                reason = "cross-origin request"
+            elif cross_site:
+                reason = "cross-site request"
+        elif cross_site and urlparse(self.path).path.startswith("/api/"):
+            reason = "cross-site request"
+        if reason:
+            self._send(403, {"error": "forbidden: " + reason})
+            return False
+        return True
+
     def do_GET(self):
+        if not self._request_allowed():
+            return
         url = urlparse(self.path)
         qs = parse_qs(url.query)
         db = self.server.db
@@ -1561,6 +1607,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._send(404, {"error": "not found"})
 
     def do_POST(self):
+        if not self._request_allowed():
+            return
         url = urlparse(self.path)
         if url.path == "/api/config":
             try:
