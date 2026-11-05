@@ -252,8 +252,11 @@ class ArgbOverlay:
             xe.XShapeCombineRectangles(dpy, win, _SHAPE_INPUT, 0, 0, None, 0,
                                        _SHAPE_SET, 0)
             win_surf = cr.cairo_xlib_surface_create(dpy, win, vinfo.visual, w, h)
+            # Two off-screen buffers: the frame, then the frame with the
+            # fade/opacity applied, which is copied to the window in one go.
             back = cr.cairo_image_surface_create(_CAIRO_FORMAT_ARGB32, w, h)
-            if not win_surf or not back:
+            out = cr.cairo_image_surface_create(_CAIRO_FORMAT_ARGB32, w, h)
+            if not win_surf or not back or not out:
                 raise OverlayUnavailable("cairo surface creation failed")
             x.XFlush(dpy)
         except Exception as e:
@@ -294,17 +297,28 @@ class ArgbOverlay:
                     self.anim.set_mode("hidden")
                 else:
                     self._draw(cr, back, self.anim.frame())
-                    self._present(cr, win_surf, back, alpha * st.opacity)
+                    self._present(cr, win_surf, back, out, alpha * st.opacity)
                 x.XFlush(dpy)
             time.sleep(oa.FRAME_MS / 1000.0 if visible else 0.05)
 
-    def _present(self, cr, win_surf, back, alpha):
-        c = cr.cairo_create(win_surf)
+    def _present(self, cr, win_surf, back, out, alpha):
+        """Show the frame in `back` at `alpha`. Everything is composed
+        off-screen and then replaces the window's pixels in a single SOURCE
+        copy: clearing the window and painting over it as two steps let the
+        compositor sometimes show the cleared (invisible) window in between,
+        which made the pill flicker while it animated."""
+        c = cr.cairo_create(out)
         cr.cairo_set_operator(c, _OP_CLEAR)
         cr.cairo_paint(c)
         cr.cairo_set_operator(c, _OP_OVER)
         cr.cairo_set_source_surface(c, back, 0, 0)
         cr.cairo_paint_with_alpha(c, alpha)
+        cr.cairo_destroy(c)
+        cr.cairo_surface_flush(out)
+        c = cr.cairo_create(win_surf)
+        cr.cairo_set_operator(c, _OP_SOURCE)
+        cr.cairo_set_source_surface(c, out, 0, 0)
+        cr.cairo_paint(c)
         cr.cairo_destroy(c)
         cr.cairo_surface_flush(win_surf)
 
