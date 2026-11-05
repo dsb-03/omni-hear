@@ -54,12 +54,14 @@ def _pill_points(x0, y0, x1, y1, r):
 
 class RecordingOverlay:
     """Floating pill bottom-centre of the screen (Tk: Linux X11/XWayland and
-    Windows). Listening: red dot + waveform that follows the live mic level.
-    Transcribing: amber spinner + flowing wave. Drawing comes from the shared
-    model in overlay_anim.py, which the macOS overlay uses too.
+    Windows). Listening: red dot + waveform that follows the live mic level;
+    the dot becomes a rounded stop square while hands-free recording is
+    locked. Transcribing: amber spinner + flowing wave. Drawing comes from
+    the shared model in overlay_anim.py, which the macOS overlay uses too.
 
     show()/show_transcribing()/hide() are called from any thread and queued
-    to the Tk thread; set_level() is called from the audio callback.
+    to the Tk thread; set_level() is called from the audio callback and
+    set_locked() from any thread (both just set model attributes).
     """
 
     _ALPHA = 0.94
@@ -128,6 +130,10 @@ class RecordingOverlay:
         dot = canvas.create_oval(cx - oa.DOT_R, cy - oa.DOT_R,
                                  cx + oa.DOT_R, cy + oa.DOT_R,
                                  fill=oa.to_hex(oa.REC), outline="")
+        s = oa.STOP_HALF
+        stop_sq = canvas.create_polygon(
+            _pill_points(cx - s, cy - s, cx + s, cy + s, oa.STOP_CORNER),
+            smooth=True, fill=oa.to_hex(oa.REC), outline="", state="hidden")
         track = canvas.create_oval(cx - sr, cy - sr, cx + sr, cy + sr, width=2,
                                    outline=oa.to_hex(oa.mix(oa.BUSY, oa.BG, 0.75)),
                                    state="hidden")
@@ -154,12 +160,16 @@ class RecordingOverlay:
                 canvas.itemconfigure(
                     halo, state="normal",
                     fill=oa.to_hex(oa.mix(d.color, oa.BG, 1.0 - d.halo_alpha)))
-                canvas.itemconfigure(dot, state="normal", fill=oa.to_hex(d.color))
+                # Locked (hands-free): stop square instead of the dot.
+                shown, hidden = (stop_sq, dot) if d.stop else (dot, stop_sq)
+                canvas.itemconfigure(shown, state="normal", fill=oa.to_hex(d.color))
+                canvas.itemconfigure(hidden, state="hidden")
                 canvas.itemconfigure(track, state="hidden")
                 canvas.itemconfigure(spinner, state="hidden")
             else:
                 canvas.itemconfigure(halo, state="hidden")
                 canvas.itemconfigure(dot, state="hidden")
+                canvas.itemconfigure(stop_sq, state="hidden")
                 canvas.itemconfigure(track, state="normal")
                 # Tk angles run counter-clockwise; the model's run clockwise.
                 canvas.itemconfigure(spinner, state="normal", start=-d.spinner)
@@ -218,12 +228,26 @@ class RecordingOverlay:
             self.queue.put("transcribing")
 
     def hide(self):
+        self.anim.locked = False
         if self.thread.is_alive():
             self.queue.put("hide")
 
     def set_level(self, rms: float):
         """Live mic level (block RMS) from the audio callback thread."""
         self.anim.set_level(rms)
+
+    def set_locked(self, flag: bool):
+        """Hands-free lock: draw the stop square instead of the dot."""
+        self.anim.locked = bool(flag)
+
+
+# Hands-free timing (seconds): a press shorter than TAP_SECONDS is a tap, and
+# a second press within DOUBLE_TAP_SECONDS of a tap's release locks recording.
+TAP_SECONDS = 0.3
+DOUBLE_TAP_SECONDS = 0.35
+# A paste-last press during, or this soon after, a paste-last insertion is
+# our own injected keystrokes matching the hotkey (see App._paste_last_job).
+PASTE_ECHO_SECONDS = 0.3
 
 
 class App:
@@ -248,6 +272,19 @@ class App:
         self._last_inserted = ""  # last text put at the cursor (paste-last hotkey)
         self._last_rms = 0.0      # live mic level while recording (dashboard meter)
         self._locked = False      # hands-free: recording continues without holding
+        # Hotkey state machine (_on_hotkey_press): listener threads and timers
+        # call in, _hk_lock serializes them.
+        self._hk_lock = threading.Lock()
+        self._hk_state = "idle"   # while recording: "held" | "armed" | "locked"
+        self._press_t = 0.0       # when the held press began (tap detection)
+        self._rec_gen = 0         # bumped per recording, so stale timers no-op
+        self._tap_timer = None    # hands-free double-tap window
+        self._max_timer = None    # max_recording_seconds watchdog
+        # Safety cap for every recording; out-of-range CLI/file values clamp.
+        self._max_seconds = min(3600, max(10, int(
+            cfg.get("max_recording_seconds", 300))))
+        self._transcribing = 0    # transcription jobs queued or running
+        self._paste_window = None  # (start, end) of the last paste-last insert
         self._verbose = bool(cfg.get("verbose"))
         self._overlay = None
         self._listener = None
@@ -401,25 +438,50 @@ class App:
                 pass
 
     def _start_recording(self, mode="dictate"):
-        import sounddevice as sd
+        """Open the mic and start capturing; True if recording. Called with
+        _hk_lock held (see the hotkey state machine below)."""
         if self._recording:
-            return
+            return True
         self._recording = True
         self._recording_mode = mode
+        self._rec_gen += 1
         if self._overlay:
             self._overlay.show()
         if self.feedback:
             self.feedback.beep()
-        stream = sd.InputStream(
-            samplerate=self.cfg["sample_rate"],
-            channels=1,
-            dtype="float32",
-            device=self.cfg["input_device"] or None,
-            callback=self._audio_callback,
-        )
-        stream.start()
+        stream = None
+        try:
+            import sounddevice as sd
+            stream = sd.InputStream(
+                samplerate=self.cfg["sample_rate"],
+                channels=1,
+                dtype="float32",
+                device=self.cfg["input_device"] or None,
+                callback=self._audio_callback,
+            )
+            stream.start()
+        except Exception as e:
+            # No mic / device busy: say so and keep the hotkeys working
+            # rather than letting the error kill the listener thread.
+            if stream is not None:
+                try:
+                    stream.close()
+                except Exception:
+                    pass
+            self._recording = False
+            self._overlay_after_recording()
+            print(f"omnihear: could not start recording: {e}")
+            if self.feedback:
+                self.feedback.notify("omnihear error",
+                                     f"Could not start recording: {e}",
+                                     urgency="normal")
+            return False
         self._stream = stream
+        # Safety cap, held or hands-free: stop and transcribe at the limit.
+        self._max_timer = self._schedule(self._max_seconds,
+                                         self._on_max_length, self._rec_gen)
         self._log("Recording...")
+        return True
 
     def _overlay_transcribing(self):
         """Switch the indicator to its transcribing state (spinner + flowing
@@ -436,52 +498,253 @@ class App:
         if self._overlay:
             self._overlay.hide()
 
+    def _overlay_after_recording(self):
+        """A recording ended without queuing audio: back to the transcribing
+        indicator if earlier audio is still being transcribed, else hide."""
+        if self._transcribing:
+            self._overlay_transcribing()
+        else:
+            self._overlay_idle()
+
+    def _overlay_locked(self, flag):
+        set_locked = getattr(self._overlay, "set_locked", None)
+        if set_locked:
+            set_locked(flag)
+
+    def _end_recording(self):
+        """Reset hands-free state and timers as a recording stops."""
+        self._hk_state = "idle"
+        self._locked = False
+        self._overlay_locked(False)
+        for timer in (self._tap_timer, self._max_timer):
+            if timer is not None:
+                timer.cancel()
+        self._tap_timer = self._max_timer = None
+
+    def _close_stream(self):
+        stream, self._stream = self._stream, None
+        if stream is None:
+            return
+        try:
+            try:
+                stream.stop()
+            finally:
+                stream.close()
+        except Exception as e:   # e.g. the mic was unplugged mid-recording
+            print(f"omnihear: warning: closing the audio stream failed: {e}")
+
+    def _drain_audio(self):
+        chunks = []
+        while not self._audio_q.empty():
+            chunks.append(self._audio_q.get())
+        return chunks
+
     def _stop_recording(self):
+        """Stop and queue the audio for transcription. Called with _hk_lock
+        held."""
         import numpy as np
         if not self._recording:
             return
         self._recording = False
+        self._end_recording()
         mode = self._recording_mode
-        stream = self._stream
-        stream.stop()
-        stream.close()
+        self._close_stream()
 
-        chunks = []
-        while not self._audio_q.empty():
-            chunks.append(self._audio_q.get())
+        chunks = self._drain_audio()
         if not chunks:
             self._log("No audio captured.")
-            self._overlay_idle()
+            self._overlay_after_recording()
             return
         audio = np.concatenate(chunks, axis=0).flatten()
 
         duration = len(audio) / self.cfg["sample_rate"]
         if duration < self.cfg["min_duration"]:
             self._log("Too short, ignoring.")
-            self._overlay_idle()
+            self._overlay_after_recording()
             return
 
         audio = self._clean_audio(audio)
         self._log(f"Queued {duration:.2f}s of audio for transcription...")
         # Recording -> transcribing; the worker clears it when done.
         self._overlay_transcribing()
-        self._work_q.put((audio, duration, mode))
+        self._transcribing += 1
+        self._work_q.put(("transcribe", audio, duration, mode))
+
+    def _cancel_recording(self):
+        """Discard the current recording without transcribing it (hands-free
+        stray tap). Called with _hk_lock held."""
+        if not self._recording:
+            return
+        self._recording = False
+        self._end_recording()
+        self._close_stream()
+        self._drain_audio()
+        self._overlay_after_recording()
+        self._log("Single tap: recording discarded.")
+
+    # -- hotkey state machine -------------------------------------------
+    # The hotkey listener (pynput or evdev thread) and timers call in here;
+    # _hk_lock serializes them. Hold-to-talk: press starts recording, release
+    # stops and transcribes. Hands-free (cfg "hands_free") adds a lock:
+    #   press shorter than TAP_SECONDS, released -> "armed": keep recording
+    #     and wait DOUBLE_TAP_SECONDS for a second press
+    #   second press while armed -> "locked": recording continues, key up
+    #   no second press in time  -> a stray tap: discard the recording
+    #   press while locked       -> stop and transcribe (its release is moot)
+    # Every recording also gets a max_recording_seconds watchdog.
+    def _schedule(self, delay, fn, *args):
+        """Call fn(*args) after delay seconds on a daemon timer thread;
+        cancel() the returned timer to drop the call."""
+        timer = threading.Timer(delay, fn, args)
+        timer.daemon = True
+        timer.start()
+        return timer
+
+    def _on_hotkey_press(self, mode):
+        now = time.monotonic()
+        with self._hk_lock:
+            if not self._recording:
+                self._hold(mode, now)
+            elif self._hk_state == "armed":
+                if self._tap_timer is not None:
+                    self._tap_timer.cancel()
+                    self._tap_timer = None
+                if mode == self._recording_mode:
+                    self._hk_state = "locked"
+                    self._locked = True
+                    self._overlay_locked(True)
+                    self._log("Hands-free: recording locked, tap to stop.")
+                else:
+                    # The other hotkey right after a stray tap: start over.
+                    self._cancel_recording()
+                    self._hold(mode, now)
+            elif self._hk_state == "locked":
+                self._stop_recording()
+            # "held": key repeat or another hotkey while holding -- ignore,
+            # and keep the original press time.
+
+    def _hold(self, mode, now):
+        if self._start_recording(mode):
+            self._hk_state = "held"
+            self._press_t = now
+
+    def _on_hotkey_release(self, mode):
+        now = time.monotonic()
+        with self._hk_lock:
+            if (not self._recording or self._hk_state != "held"
+                    or mode != self._recording_mode):
+                return
+            if self.cfg.get("hands_free") and now - self._press_t < TAP_SECONDS:
+                self._hk_state = "armed"
+                self._tap_timer = self._schedule(
+                    DOUBLE_TAP_SECONDS, self._on_tap_timeout, self._rec_gen)
+            else:
+                self._stop_recording()
+
+    def _on_tap_timeout(self, gen):
+        with self._hk_lock:
+            if (gen == self._rec_gen and self._recording
+                    and self._hk_state == "armed"):
+                self._cancel_recording()
+
+    def _on_max_length(self, gen):
+        with self._hk_lock:
+            if gen != self._rec_gen or not self._recording:
+                return
+            self._stop_recording()
+        msg = (f"Recording reached the {self._max_seconds}s limit "
+               "(max_recording_seconds); transcribing it.")
+        print(f"omnihear: {msg}")
+        if self.feedback:
+            self.feedback.notify("omnihear", msg, urgency="normal")
+
+    def _hotkey_bindings(self, combo, parse):
+        """[(combo, on_press, on_release)] for the hotkey listener. combo is
+        the parsed main hotkey; parse() turns the optional ask/paste-last
+        hotkeys into the same key sets (pynput keys or evdev codes). One
+        that is invalid or equal to a combo already bound is disabled."""
+        bindings = [(combo, lambda: self._on_hotkey_press("dictate"),
+                     lambda: self._on_hotkey_release("dictate"))]
+        taken = {combo: "hotkey"}
+
+        def extra(key, feature):
+            name = self.cfg.get(key) or ""
+            if not name:
+                return None
+            try:
+                parsed = parse(name)
+            except ValueError as e:
+                print(f"omnihear: invalid {key} ({e}), {feature} disabled")
+                return None
+            if parsed in taken:
+                print(f"omnihear: {key} matches {taken[parsed]}, "
+                      f"{feature} disabled")
+                return None
+            taken[parsed] = key
+            return parsed
+
+        ask = extra("ask_hotkey", "voice Q&A")
+        if ask is not None:
+            bindings.append((ask, lambda: self._on_hotkey_press("ask"),
+                             lambda: self._on_hotkey_release("ask")))
+        paste = extra("paste_last_hotkey", "paste-last")
+        if paste is not None:
+            bindings.append((paste, self.paste_last, None))
+        return bindings
+
+    # -- paste last -------------------------------------------------------
+    def paste_last(self):
+        """Re-insert the last transcript at the cursor (paste-last hotkey;
+        safe from any thread). Goes through the worker queue, so it lands
+        after any transcriptions still pending."""
+        self._work_q.put(("paste_last", time.monotonic()))
+
+    def _paste_last_job(self, pressed_at):
+        """Worker: put the last inserted text at the cursor again (never
+        written to history)."""
+        win = self._paste_window
+        if win is not None and win[0] <= pressed_at <= win[1] + PASTE_ECHO_SECONDS:
+            # Our own insertion pressed the hotkey (e.g. shift_l+v while
+            # typing a "V"): ignore it rather than re-pasting in a loop.
+            return
+        text = self._last_inserted
+        if not text:
+            if self.feedback:
+                self.feedback.notify("omnihear", "Nothing to paste yet")
+            return
+        start = time.monotonic()
+        self._insert(text)
+        self._paste_window = (start, time.monotonic())
+        self._last_typed_len = len(text)  # "undo" removes this insertion
+        self._log("Pasted the last transcript again.")
 
     # -- transcription worker -----------------------------------------
     def _worker_loop(self):
+        # The one worker runs every job in order: ("transcribe", audio,
+        # duration, mode) from _stop_recording and ("paste_last", pressed_at)
+        # from the paste-last hotkey.
         while True:
-            audio, duration, mode = self._work_q.get()
+            job = self._work_q.get()
             try:
-                self._transcribe_one(audio, duration, mode)
+                if job[0] == "paste_last":
+                    self._paste_last_job(job[1])
+                else:
+                    _, audio, duration, mode = job
+                    self._transcribe_one(audio, duration, mode)
             except Exception as e:
-                print(f"Transcription error: {e}")
+                what = "Paste-last" if job[0] == "paste_last" else "Transcription"
+                print(f"{what} error: {e}")
                 if self.feedback:
                     self.feedback.notify("omnihear error", str(e),
                                          urgency="normal")
             finally:
-                # Clear the transcribing indicator once the queue drains.
-                if self._work_q.empty():
-                    self._overlay_idle()
+                if job[0] == "transcribe":
+                    with self._hk_lock:
+                        self._transcribing -= 1
+                        # Clear the transcribing indicator once nothing is
+                        # left to transcribe, unless a new recording is up.
+                        if not self._transcribing and not self._recording:
+                            self._overlay_idle()
 
     @staticmethod
     def _rss_mb():
@@ -665,61 +928,65 @@ class App:
                       "disabled on Wayland")
 
         ask_hotkey = self.cfg.get("ask_hotkey") or ""
+        paste_last = self.cfg.get("paste_last_hotkey") or ""
         threading.Thread(target=self._worker_loop, daemon=True).start()
         threading.Thread(target=self._idle_unload_loop, daemon=True).start()
 
         print(f"Hold '{config_mod.hotkey_display(self.cfg['hotkey'])}' to "
               "record, release to transcribe & type. Ctrl+C to quit.")
+        if self.cfg.get("hands_free"):
+            print("Hands-free (beta): double-tap it to keep recording without "
+                  "holding, then tap once more to stop.")
         if ask_hotkey:
             print(f"Hold '{config_mod.hotkey_display(ask_hotkey)}' to ask a "
                   "question (voice Q&A, beta).")
+        if paste_last:
+            print(f"Press '{config_mod.hotkey_display(paste_last)}' to paste "
+                  "the last transcript again.")
+        if self._max_seconds != self.cfg.get("max_recording_seconds", 300):
+            print("omnihear: max_recording_seconds must be 10-3600, using "
+                  f"{self._max_seconds}")
         print("Model loads lazily on first press; first transcription "
               "after load takes a few extra seconds.")
 
         if linux_session.is_wayland():
-            self._run_evdev(ask_hotkey)
+            self._run_evdev()
         else:
-            self._run_pynput(ask_hotkey)
+            self._run_pynput()
 
-    def _run_pynput(self, ask_hotkey: str):
+    def _run_pynput(self):
         from pynput import keyboard
+        from .evdev_hotkey import ComboMatcher
 
         combo = parse_hotkey(self.cfg["hotkey"])
         if self._type_method == "pynput":
             self._kb_controller = keyboard.Controller()
 
-        ask_combo = None
-        if ask_hotkey:
-            try:
-                ask_combo = parse_hotkey(ask_hotkey)
-            except ValueError as e:
-                print(f"omnihear: invalid ask_hotkey ({e}), voice Q&A disabled")
-            if ask_combo == combo:
-                print("omnihear: ask_hotkey matches hotkey, voice Q&A disabled")
-                ask_combo = None
+        matcher = ComboMatcher(self._hotkey_bindings(combo, parse_hotkey))
 
-        pressed = set()
+        def canonical(key):
+            # Undo modifiers on character keys so a combo like
+            # ctrl_l+shift_l+v matches: X11/macOS report 'V' while Shift is
+            # held, Windows reports Ctrl+V as the control character '\x16'.
+            # (evdev matches raw keycodes, so both backends now agree.)
+            char = getattr(key, "char", None)
+            if not char or len(char) != 1:
+                return key
+            if "\x01" <= char <= "\x1a":
+                char = chr(ord(char) + 0x60)
+            return keyboard.KeyCode.from_char(char.lower())
 
         def on_press(key):
-            if key not in combo and (ask_combo is None or key not in ask_combo):
-                return
-            pressed.add(key)
-            if pressed == combo:
-                self._start_recording("dictate")
-            elif ask_combo is not None and pressed == ask_combo:
-                self._start_recording("ask")
+            matcher.press(canonical(key))
 
         def on_release(key):
-            if key not in combo and (ask_combo is None or key not in ask_combo):
-                return
-            pressed.discard(key)
-            self._stop_recording()
+            matcher.release(canonical(key))
 
         self._listener = keyboard.Listener(on_press=on_press, on_release=on_release)
         with self._listener as listener:
             listener.join()
 
-    def _run_evdev(self, ask_hotkey: str):
+    def _run_evdev(self):
         from . import evdev_hotkey
 
         try:
@@ -727,23 +994,8 @@ class App:
         except ValueError as e:
             raise SystemExit(f"omnihear: invalid hotkey for Wayland: {e}") from e
 
-        ask_combo = None
-        if ask_hotkey:
-            try:
-                ask_combo = evdev_hotkey.parse_hotkey_codes(ask_hotkey)
-            except ValueError as e:
-                print(f"omnihear: invalid ask_hotkey ({e}), voice Q&A disabled")
-            if ask_combo == combo:
-                print("omnihear: ask_hotkey matches hotkey, voice Q&A disabled")
-                ask_combo = None
-
         monitor = evdev_hotkey.HotkeyMonitor(
-            combo,
-            on_dictate_start=lambda: self._start_recording("dictate"),
-            on_stop=self._stop_recording,
-            ask_combo=ask_combo,
-            on_ask_start=(lambda: self._start_recording("ask")) if ask_combo else None,
-        )
+            self._hotkey_bindings(combo, evdev_hotkey.parse_hotkey_codes))
         self._listener = monitor
         with monitor:
             # Keep the main thread alive so Ctrl+C works; the monitor
@@ -757,6 +1009,11 @@ class App:
     def stop(self):
         if self._listener is not None:
             self._listener.stop()
+        # Drop pending hands-free/watchdog timers. No lock here: stop() must
+        # never block (the tray's force-exit timer starts after it returns).
+        for timer in (self._tap_timer, self._max_timer):
+            if timer is not None:
+                timer.cancel()
 
 
 def list_devices():
