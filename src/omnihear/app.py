@@ -245,9 +245,10 @@ class RecordingOverlay:
 # a second press within DOUBLE_TAP_SECONDS of a tap's release locks recording.
 TAP_SECONDS = 0.3
 DOUBLE_TAP_SECONDS = 0.35
-# A paste-last press during, or this soon after, a paste-last insertion is
-# our own injected keystrokes matching the hotkey (see App._paste_last_job).
-PASTE_ECHO_SECONDS = 0.3
+# A hotkey press during, or this soon after, one of our own insertions may be
+# our injected keystrokes matching it: pynput listeners (X11, Windows, macOS)
+# see synthetic keys too. See App._insertion_echo / _could_self_trigger.
+INSERT_ECHO_SECONDS = 0.3
 
 
 class App:
@@ -284,7 +285,8 @@ class App:
         self._max_seconds = min(3600, max(10, int(
             cfg.get("max_recording_seconds", 300))))
         self._transcribing = 0    # transcription jobs queued or running
-        self._paste_window = None  # (start, end) of the last paste-last insert
+        self._inserting = False     # an insertion is in progress (worker)
+        self._insert_window = None  # (start, end) of the most recent insertion
         self._verbose = bool(cfg.get("verbose"))
         self._overlay = None
         self._listener = None
@@ -330,6 +332,7 @@ class App:
             # 0..1 live mic level while recording (same scale as the overlay)
             "level": level_from_rms(self._last_rms) if self._recording else 0.0,
             "type_method": self._type_method,
+            "paste": self._paste,
             "cleanup": self.cfg.get("cleanup", "off"),
         }
 
@@ -412,11 +415,58 @@ class App:
         """Put text at the cursor. Single entry point for every insertion
         (dictation, Q&A answers, paste-last), so insertion strategy
         (typing vs. clipboard paste) lives in one place."""
-        if self._paste and text:
-            self._paste_text(text)
-        else:
-            self._type_text(text)
+        self._inserting = True
+        start = time.monotonic()
+        try:
+            if self._paste and text:
+                self._paste_text(text)
+            else:
+                self._type_text(text)
+        finally:
+            self._insert_window = (start, time.monotonic())
+            self._inserting = False
         self._last_inserted = text
+
+    def _insertion_echo(self, t):
+        """True if time t falls during, or just after, one of our own
+        insertions -- i.e. a hotkey "press" then may be our injected keys."""
+        if self._inserting:
+            return True
+        win = self._insert_window
+        return win is not None and win[0] <= t <= win[1] + INSERT_ECHO_SECONDS
+
+    def _could_self_trigger(self, name):
+        """Could our own text insertion press this hotkey combo? pynput
+        listeners (X11, Windows, macOS) also see keys we inject; the Wayland
+        evdev reader skips our virtual keyboards, so it never can. Typing
+        presses character keys and Shift; paste mode also sends Ctrl+V
+        (Windows) or Cmd+V (macOS) (Linux's Shift+Insert is covered by
+        Shift)."""
+        if sys.platform not in ("win32", "darwin"):
+            from . import linux_session
+            if linux_session.is_wayland():
+                return False
+        parts = [p for p in name.strip().lower().split("+") if p]
+        risky = {"shift_l", "shift_r"}
+        if self._paste and sys.platform == "win32":
+            risky |= {"ctrl_l", "ctrl_r"}
+        if self._paste and sys.platform == "darwin":
+            risky |= {"cmd_l", "cmd_r"}
+        return bool(parts) and all(p in risky or len(p) == 1 for p in parts)
+
+    def _guard_press(self, name, on_press):
+        """Wrap a hotkey on_press so presses during our own insertions are
+        ignored -- only for combos our insertion could actually press, so a
+        normal hotkey (e.g. Right Ctrl) still works while text is typing."""
+        if not name or not self._could_self_trigger(name):
+            return on_press
+
+        def guarded():
+            if self._insertion_echo(time.monotonic()):
+                self._log(f"Ignored {name} press during our own typing.")
+                return
+            on_press()
+        return guarded
 
     def _paste_text(self, text):
         """Clipboard paste: save the user's clipboard text, put ours there,
@@ -798,13 +848,19 @@ class App:
         the parsed main hotkey; parse() turns the optional ask/paste-last
         hotkeys into the same key sets (pynput keys or evdev codes). One
         that is invalid or equal to a combo already bound is disabled."""
-        bindings = [(combo, lambda: self._on_hotkey_press("dictate"),
+        bindings = [(combo,
+                     self._guard_press(self.cfg.get("hotkey", ""),
+                                       lambda: self._on_hotkey_press("dictate")),
                      lambda: self._on_hotkey_release("dictate"))]
         taken = {combo: "hotkey"}
 
         def extra(key, feature):
             name = self.cfg.get(key) or ""
             if not name:
+                return None
+            if key == "paste_last_hotkey" and config_mod.is_paste_shortcut(name):
+                print(f"omnihear: {key} is your system paste shortcut "
+                      f"({name}), {feature} disabled")
                 return None
             try:
                 parsed = parse(name)
@@ -820,7 +876,9 @@ class App:
 
         ask = extra("ask_hotkey", "voice Q&A")
         if ask is not None:
-            bindings.append((ask, lambda: self._on_hotkey_press("ask"),
+            bindings.append((ask,
+                             self._guard_press(self.cfg.get("ask_hotkey", ""),
+                                               lambda: self._on_hotkey_press("ask")),
                              lambda: self._on_hotkey_release("ask")))
         paste = extra("paste_last_hotkey", "paste-last")
         if paste is not None:
@@ -837,19 +895,17 @@ class App:
     def _paste_last_job(self, pressed_at):
         """Worker: put the last inserted text at the cursor again (never
         written to history)."""
-        win = self._paste_window
-        if win is not None and win[0] <= pressed_at <= win[1] + PASTE_ECHO_SECONDS:
+        if self._insertion_echo(pressed_at):
             # Our own insertion pressed the hotkey (e.g. shift_l+v while
-            # typing a "V"): ignore it rather than re-pasting in a loop.
+            # typing a "V", or this job's own paste): ignore it rather than
+            # pasting again (or in a loop).
             return
         text = self._last_inserted
         if not text:
             if self.feedback:
                 self.feedback.notify("omnihear", "Nothing to paste yet")
             return
-        start = time.monotonic()
         self._insert(text)
-        self._paste_window = (start, time.monotonic())
         self._last_typed_len = len(text)  # "undo" removes this insertion
         self._log("Pasted the last transcript again.")
 

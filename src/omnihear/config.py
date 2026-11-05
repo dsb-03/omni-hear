@@ -41,6 +41,17 @@ LINUX_TYPE_METHODS = ("uinput", "xdotool", "ydotool", "wtype")
 # previous clipboard. Falls back to typing if the clipboard is unavailable.
 TYPE_METHODS = ("auto", "pynput", "paste") + LINUX_TYPE_METHODS
 
+# System paste shortcuts. Binding paste_last_hotkey to one would fire on
+# every ordinary paste (and on omnihear's own pastes in paste mode).
+PASTE_SHORTCUTS = (frozenset({"ctrl_l", "v"}), frozenset({"ctrl_r", "v"}),
+                   frozenset({"cmd_l", "v"}), frozenset({"cmd_r", "v"}))
+
+
+def is_paste_shortcut(name: str) -> bool:
+    parts = frozenset(p for p in str(name).strip().lower().split("+") if p)
+    return parts in PASTE_SHORTCUTS
+
+
 # Text cleanup levels applied to dictation (see cleanup.py).
 CLEANUP_LEVELS = ("off", "light")
 
@@ -293,7 +304,11 @@ def validate_updates(updates: dict) -> tuple[dict, list[str]]:
             clean["paste_last_hotkey"] = ""  # empty disables it
         else:
             hk = validate_hotkey(v)
-            if hk:
+            if hk and is_paste_shortcut(hk):
+                errors.append("paste_last_hotkey can't be the system paste "
+                              "shortcut (it would fire on every paste)")
+                del clean["paste_last_hotkey"]
+            elif hk:
                 clean["paste_last_hotkey"] = hk
             else:
                 errors.append("paste_last_hotkey must be known key names or "
