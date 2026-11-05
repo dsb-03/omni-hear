@@ -64,9 +64,27 @@ omnihear --write-config
 
 Keys mirror the CLI flags (`model`, `hotkey`, `device`, `compute_type`,
 `language`, `beam_size`, `min_duration`, `input_device`, `type_method`,
-`sample_rate`) plus `dashboard`, `dashboard_port`, `notify`, `beep`,
+`sample_rate`, `hands_free`, `max_recording_seconds`, `paste_last_hotkey`,
+`cleanup`) plus `dashboard`, `dashboard_port`, `notify`, `beep`,
 `history`, and `idle_unload_minutes`. `type_method` defaults to `auto`
 (pynput on X11/Windows/macOS; the built-in uinput typer on Wayland).
+
+## Dictation features (beta)
+
+All off by default. Turn them on in the dashboard (Settings → Dictation) or
+in `config.toml`, then restart omnihear.
+
+| Setting | What it does |
+|---|---|
+| `hands_free = true` | Double-tap the hotkey to keep recording without holding it; tap once more to stop. A single quick tap is ignored. |
+| `max_recording_seconds = 300` | Safety cap for any recording (10–3600 s); stops and transcribes at the limit. Always on. |
+| `type_method = "paste"` | Inserts through the clipboard (Shift+Insert on Linux, Ctrl+V on Windows, Cmd+V on macOS) and restores what you had copied. Instant for long text, works with any keyboard layout. Linux needs `xclip` (X11, GNOME) or `wl-clipboard` (KDE, wlroots); the `.deb` recommends both. |
+| `cleanup = "light"` | Removes "um/uh", stutters ("the the") and spoken corrections ("at 2, actually 3" → "at 3") before typing. English only, and cautious on purpose. |
+| `paste_last_hotkey = "f8"` | Puts your last transcript at the cursor again, for when it went to the wrong window. Can't be your system paste shortcut. |
+
+The dashboard also has a **Setup** tab, a first-run wizard that checks your
+setup, tests the hotkey and microphone live, and confirms a practice
+dictation lands. Every transcript in the dashboard has a **Copy** button.
 
 ## Running as a service
 
@@ -211,7 +229,7 @@ sudo modprobe uinput && sudo udevadm control --reload-rules && sudo udevadm trig
 ```
 
 Known limits: typing assumes a US QWERTY layout (other layouts can get some
-symbols wrong — clipboard paste is on the [roadmap](ROADMAP.md)), and
+symbols wrong; `type_method = "paste"`, beta, avoids this), and
 `terminal_commands` stays X11-only.
 
 ## Requirements

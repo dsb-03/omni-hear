@@ -1,9 +1,11 @@
 # omnihear: features and improvements
 
 Every new feature and improvement in one list. Checked items are built on
-this branch (going out as **1.9.0**). Unchecked items are planned, tagged
-with the release they're aimed at. [ROADMAP.md](ROADMAP.md) has the
-reasoning, design notes and rollout process for each one.
+this branch: the Wayland and overlay work is planned as **1.9.0**, and the
+dictation features as **1.10** (beta, off by default until they've had a
+release of real use). Unchecked items are planned, tagged with the release
+they're aimed at. [ROADMAP.md](ROADMAP.md) has the reasoning, design notes
+and rollout process for each one.
 
 ## New features
 
@@ -35,22 +37,53 @@ reasoning, design notes and rollout process for each one.
 - [x] **Landing page** at https://dsb-03.github.io/omni-hear/ with install
   steps per platform, features, FAQ, and a live demo of the new overlay.
 
-### Planned
+### Built in this branch (1.10, beta)
 
-**1.10: Feel like Flow**
-- [ ] **Paste insertion** (`type_method = "paste"`): instant for long text,
-  works with every keyboard layout and script, and restores your clipboard
-  afterwards. Falls back to typing, then to "copied, press Ctrl+V".
-- [ ] **Hands-free mode**: double-tap the hotkey to keep recording without
-  holding it, tap again to stop. Includes a maximum-length safety cap.
-- [ ] **Cleanup, rule-based**: removes "um/uh", repeated words ("the the")
-  and self-corrections ("at 2, actually 3" becomes "at 3"), and formats
-  spoken lists as bullets.
-- [ ] **First-run setup wizard** in the dashboard: doctor checks with
-  one-click copy fixes, a mic test with a live meter, a hotkey test, and a
-  practice box.
-- [ ] **Paste last transcript**: a button and an optional hotkey for when
-  the text went to the wrong window.
+These are off by default; turn them on in the dashboard (Settings >
+Dictation) or `config.toml`.
+
+- [x] **Paste insertion** (`type_method = "paste"`). The text goes on the
+  clipboard and omnihear sends the paste shortcut (Shift+Insert on Linux,
+  Ctrl+V on Windows, Cmd+V on macOS), then restores whatever you had copied
+  about 0.6 s later. Instant for long text and works with every keyboard
+  layout and script.
+  - Never overwrites something you copied in the meantime. Rapid
+    dictations paste in order and still restore your original clipboard.
+  - Falls back to typing when no clipboard tool is available, and to
+    "copied, press Ctrl+V" if the paste key can't be sent.
+  - Linux uses xclip/xsel, or wl-clipboard on KDE and wlroots. On GNOME it
+    goes through the X11 clipboard bridge, because GNOME lacks the
+    clipboard protocol `wl-copy` needs. On Windows, dictated text is kept
+    out of clipboard history and cloud sync.
+- [x] **Hands-free mode** (`hands_free = true`). Double-tap the hotkey to
+  keep recording without holding it; tap once more to stop. A single quick
+  tap is discarded. The overlay's red dot turns into a stop square while
+  locked.
+- [x] **Maximum recording length** (`max_recording_seconds`, default 300):
+  recording stops and is transcribed at the limit, with a notification.
+- [x] **Cleanup** (`cleanup = "light"`). Removes "um/uh/er", stutters ("the
+  the", "I I") and spoken self-corrections ("at 2, actually 3" becomes
+  "at 3"; "send it to John, no wait, Sarah" becomes "send it to Sarah").
+  - Deliberately cautious: it only rewrites a correction when both sides
+    are clearly the same kind of thing (numbers, days, names, or the same
+    phrase with one word changed). "That was, actually, quite good" stays
+    as is.
+  - English only.
+  - Spoken lists are *not* turned into bullets yet: a typed newline is
+    Enter, which sends the message in chat apps. Moved to per-app styles
+    (1.11).
+- [x] **First-run setup wizard** in the dashboard (Setup tab, opens by
+  itself the first time). Three steps:
+  1. The `--doctor` checks, with copy buttons for every fix command.
+  2. A live hotkey and microphone test with a level meter.
+  3. A practice box that confirms dictation really lands.
+- [x] **Paste last transcript**: an optional hotkey (`paste_last_hotkey`)
+  puts your last transcript at the cursor again, plus Copy buttons on every
+  transcript in the dashboard.
+- [x] **Record any hotkey by pressing it** in the dashboard: main hotkey,
+  paste-last and voice Q&A, with a Clear button for the optional ones.
+
+### Planned
 
 **1.11: Personal**
 - [ ] **Personal dictionary**: add or pin names and jargon. Merges with the
@@ -75,7 +108,7 @@ reasoning, design notes and rollout process for each one.
 
 ## Other improvements
 
-### Built in this branch (1.9.0)
+### Built in this branch (1.9.0 and 1.10)
 
 - [x] **Fixed a fresh-install failure on Ubuntu.** The `.deb` failed to
   install on a stock desktop because a dependency (`evdev`, pulled in by
@@ -97,6 +130,27 @@ reasoning, design notes and rollout process for each one.
   heavy dependencies ship wheels for it.
 - [x] **One animation model for every platform** (`overlay_anim.py`) with a
   headless self-check, so Linux, Windows and macOS can't drift apart.
+- [x] **Hotkeys can't be triggered by omnihear's own typing.** On X11,
+  Windows and macOS, keys omnihear injects are visible to its own hotkey
+  listener. Shift or single-letter hotkeys could start or lock a recording
+  while text was typed, and a paste-last hotkey like Shift+V could fire on
+  every capital V and loop. Those presses are now ignored while omnihear
+  is inserting text. Your system paste shortcut can't be chosen as the
+  paste-last hotkey.
+- [x] **Releasing an unrelated key no longer cuts a recording short.**
+  Each hotkey combo now tracks its own press and release, on X11 and
+  Wayland alike.
+- [x] **A missing or busy microphone no longer stops hotkeys working.**
+  omnihear shows an error and keeps listening for the hotkey.
+- [x] **Fully offline dashboard.** It loaded a Google font from the
+  internet; it now uses local fonts only, as the project rules require.
+- [x] **Dashboard fixes:**
+  - Opening a History or detail link directly no longer crashes the page.
+  - Searches containing an apostrophe work.
+  - Pages fit phone screens.
+  - The correction box is readable in dark mode.
+- [x] **The overlay stays visible** while a newer recording is running
+  (it could be hidden by the previous transcription finishing).
 
 ### Planned
 
@@ -104,7 +158,8 @@ reasoning, design notes and rollout process for each one.
   GlobalShortcuts portal (GNOME 48+, KDE 6). Removes the last manual setup
   step and the broad keyboard-read permission. *(continuous)*
 - [ ] **Non-US keyboard layouts** typed correctly by the built-in Wayland
-  typer (de, fr, uk, es, it); paste covers the rest. *(continuous)*
+  typer (de, fr, uk, es, it). Paste mode (1.10, beta) already handles
+  every layout. *(continuous)*
 - [ ] **More packages:** arm64 `.deb`, an offline `.deb` with bundled
   Python packages, Fedora RPM, AUR. *(continuous)*
 - [ ] **Signed installers:** Windows (no SmartScreen warning) and macOS

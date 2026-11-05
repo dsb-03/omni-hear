@@ -13,17 +13,17 @@ and Linux (X11 and Wayland), Windows and macOS all keep working.
 | Capability | Wispr Flow | omnihear today | Plan |
 |---|---|---|---|
 | Hold-to-talk into any app | Fn key | Any key/combo | Done |
-| Hands-free mode (lock recording) | Double-tap / Fn+Space | No | Phase 1 |
-| Insertion | Clipboard paste, restores clipboard | Simulated typing | Phase 1: `paste` method |
+| Hands-free mode (lock recording) | Double-tap / Fn+Space | Double-tap to lock, tap to stop (beta) | Built (1.10) |
+| Insertion | Clipboard paste, restores clipboard | Typing, or clipboard paste with restore (beta) | Built (1.10) |
 | Live "Flow bar" with mic level | Yes | Yes: live waveform, spinner while transcribing, no-signal warning | Done (1.9.0) |
-| Filler-word removal, self-corrections ("2pm, actually 3") | AI auto-edit (cloud) | Spoken punctuation, "scratch that" | Phase 1 (rules), Phase 3 (local LLM) |
+| Filler-word removal, self-corrections ("2pm, actually 3") | AI auto-edit (cloud) | Rule-based cleanup, English (beta) | Built (1.10); local LLM in Phase 3 |
 | Personal dictionary | Auto-learned + manual | Common Brain (auto, beta) | Phase 2: manual UI |
 | Snippets (voice shortcuts) | Yes | No | Phase 2 |
 | Per-app tone/style | Yes | No | Phase 2 |
 | Command Mode (select text, speak an edit) | Yes (cloud LLM) | Voice Q&A only (Ollama) | Phase 3 |
 | Whispering / quiet speech | Yes | No | Phase 3 |
 | Stats (WPM, time saved, streaks) | Yes | Words/day, latency, CPU/RAM | Phase 2 |
-| Guided onboarding + permission checks | Yes | macOS prompts; `--doctor` CLI | Phase 1: dashboard wizard |
+| Guided onboarding + permission checks | Yes | Dashboard setup wizard + `--doctor` | Built (1.10) |
 | Privacy | Cloud, with a zero-retention option | Fully local | Our edge, keep it |
 | Linux / Wayland | No | Yes | Our edge, harden it (Phase 0, 4) |
 
@@ -97,42 +97,89 @@ group (Phase 4 portal removes that).
 
 ---
 
-## Phase 1: Feel like Flow (1.10)
+## Phase 1: Feel like Flow (1.10, built on this branch)
 
 Theme: faster, more trustworthy insertion and a first run that just works.
+Everything here is built and tested on this branch, beta and off by
+default (see "Rollout" below). [FEATURES.md](FEATURES.md) has the
+user-facing summary.
 
-1. **`type_method = "paste"`** (opt-in in 1.10, default in 1.11 where it
-   tests well). Copy to the clipboard, send paste, then restore the previous
-   clipboard after about 300 ms. This is instant for long text and works with
-   any layout and any script.
-   - X11: `xclip`/`xsel` (or Tk's clipboard) + Ctrl+V; Windows: `ctypes`
-     clipboard + Ctrl+V; macOS: `pbcopy` + Cmd+V.
-   - Wayland: `wl-copy` + **Shift+Insert** via the uinput keyboard
-     (Shift+Insert pastes in GTK, Qt, Chromium, Firefox and VTE terminals,
-     which avoids the Ctrl+V vs Ctrl+Shift+V split). Restore only text
-     clipboards.
-   - Fallback: if paste fails, type it; if typing fails, leave the text on
-     the clipboard and notify "copied — press Ctrl+V".
-2. **Hands-free mode.** Double-tap the hotkey to lock recording, tap again to
-   stop. Uses a 350 ms window in both pynput and evdev monitors and a
-   `max_recording_seconds` safety cap. The overlay adds a lock state to
-   the 1.9.0 pill.
-3. **Rule-based cleanup** (`cleanup = "off" | "light"`, stdlib in
-   `commands.py`): drop fillers (um, uh, er, "you know" at clause edges),
-   collapse stutters ("the the"), handle inline backtracking ("at 2, actually
-   3" → "at 3", "no wait" / "I mean" patterns), and turn spoken lists into
-   bullets when there's "first/second/third". Each rule ships with a
-   self-check case like the existing ones.
-4. **Onboarding wizard in the dashboard.** On first run, `#/welcome` shows the
-   `--doctor` results (`/api/doctor`) with copy-to-clipboard fixes, a mic test
-   with a live meter, a "press your hotkey" test, and a practice text box.
-   Linux shows the `input` group step only when it's actually needed.
-5. **"Paste last transcript"** dashboard button and optional hotkey,
-   Flow's recovery path for when focus was in the wrong place.
+1. **`type_method = "paste"`** (`clipboard.py`). Save the clipboard, put the
+   text on it, send the paste key through the auto-selected key backend,
+   and restore the original about 0.6 s later.
+   - **Paste key:** Linux sends **Shift+Insert**, which avoids the Ctrl+V
+     vs Ctrl+Shift+V split between apps and terminals. Windows sends Ctrl+V
+     (by virtual key, so non-Latin layouts work); macOS sends Cmd+V.
+   - **Both selections on Linux:** omnihear sets PRIMARY as well as
+     CLIPBOARD. Terminals built on VTE (GNOME Terminal, Ptyxis) have
+     historically pasted PRIMARY on Shift+Insert, while GTK, Qt, Chromium
+     and Firefox paste CLIPBOARD.
+   - **Linux tool choice:** X11 uses xclip or xsel. KDE and wlroots use
+     wl-copy/wl-paste first. On GNOME Wayland omnihear prefers xclip
+     through XWayland: Mutter has no wlr/ext data-control protocol, so
+     `wl-copy` would have to steal focus with a popup surface, while Mutter
+     bridges X11 selections to Wayland apps.
+   - **Restore rules:** a restore never clobbers a newer paste (each paste
+     has a generation number) or something the user copied in the meantime.
+     Back-to-back pastes are spaced so each app reads the right text. Image
+     clipboards can't be restored; the dictated text is left in their place.
+   - **Fallbacks:** if the clipboard is unavailable, omnihear types. If the
+     paste key fails, it leaves the text on the clipboard and notifies
+     "copied — press Ctrl+V".
+   - **Windows:** dictated text is excluded from clipboard history and
+     cloud sync.
+   - **Tested:** X11 (pynput and xdotool), and headless sway with XWayland
+     for the Wayland tools. GNOME and KDE themselves, Windows and macOS
+     still need real-hardware checks.
+   - **Default:** stays opt-in until it has been verified on GNOME and KDE.
+2. **Hands-free mode.**
+   - **Timing:** a press shorter than 0.3 s that's followed within 0.35 s by
+     a second press locks the recording. The next tap stops it. A lone tap
+     is discarded.
+   - **Shared implementation:** the state machine lives in `App` and is
+     backend-agnostic. pynput and evdev both feed it through one combo
+     matcher (`evdev_hotkey.ComboMatcher`), so release semantics are
+     identical on X11 and Wayland.
+   - **Safety cap:** `max_recording_seconds` applies to every recording.
+   - **Overlay:** shows a stop square while locked.
+3. **Rule-based cleanup** (`cleanup.py`, `cleanup = "light"`).
+   - **What it fixes:** fillers, function-word stutters, and spoken
+     self-corrections.
+   - **Guard on corrections:** a correction is only applied when the
+     replaced phrase and the new one are clearly the same kind of thing
+     (numbers or times, days or months, names, or a shared leading word).
+     It also refuses negations, "when I say X, I mean Y", belief verbs and
+     apologies.
+   - **English only.**
+   - **Tested:** 162 self-check cases, a 300,000-input fuzz, and 35,495 real
+     English sentences with no wrong edits.
+   - **Deferred:** spoken-list → bullets moves to per-app styles (Phase 2),
+     because a typed newline is Enter and sends the message in chat apps.
+4. **Onboarding wizard in the dashboard** (`#/welcome`, opens on first run).
+   - **Step 1:** `/api/doctor` checks with copy buttons for fix commands.
+   - **Step 2:** a live hotkey and mic-level test, polling `/api/status`
+     only while visible.
+   - **Step 3:** a practice box that detects whether dictation actually
+     landed.
+5. **Paste last transcript.** An optional `paste_last_hotkey` runs through
+   the worker queue, so it lands after pending transcriptions and is never
+   saved to history. Every transcript in the dashboard also gets a Copy
+   button.
+6. **Found while integrating:** omnihear's own injected keys could trigger
+   its hotkeys on X11, Windows and macOS. With a Shift hotkey, typed
+   capitals could lock a recording. A paste-last hotkey like Shift+V
+   re-fired on every typed capital V and looped. Presses that land during
+   one of our own insertions are now ignored, but only for combos the
+   insertion could actually produce. The system paste shortcut is rejected
+   as a paste-last hotkey.
 
-**Rollout:** each item ships behind its own config key. The dashboard shows
-it under "Beta" with default off for 1.10.x. Defaults flip in 1.11 after one
-release with no regressions reported against the matrix.
+**Rollout:**
+- 1.10.x ships each item behind its own config key, off by default, in a
+  "Dictation (new)" section of Settings, so it isn't hidden behind the
+  sign-in Beta page.
+- In 1.11, `hands_free` and `cleanup = "light"` become defaults once they've
+  had a release with no regressions. `paste` follows once it's been
+  checked on GNOME and KDE.
 
 ---
 
@@ -146,7 +193,8 @@ release with no regressions reported against the matrix.
    to stored text. They live in a `snippets` table (`_migrate()` adds it),
    match only on the whole utterance after normalization so prose never
    misfires, and are edited in the dashboard.
-3. **Per-app styles.** Detect the focused app: X11 via `xdotool
+3. **Per-app styles.** Also takes over spoken-list → bullets formatting,
+   which is only safe where Enter doesn't send. Detect the focused app: X11 via `xdotool
    getactivewindow getwindowclassname`, Windows via `GetForegroundWindow`
    (`ctypes`), macOS via `NSWorkspace` (already in pyobjc). GNOME Wayland has
    no API, so it falls back to the default style. A style is rule-based
