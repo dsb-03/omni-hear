@@ -113,6 +113,31 @@ Description: Push-to-talk local Whisper transcription for Linux
  your setup.
 
 Package: omnihear
+Version: 1.10.3
+Architecture: amd64
+Maintainer: dsb <you@example.com>
+Depends: python3 (>= 3.11), python3-venv, python3-tk, libportaudio2, udev
+Recommends: libnotify-bin, xdotool, xclip, wl-clipboard
+Suggests: ydotool, wtype
+Filename: pool/main/o/omnihear/omnihear_1.10.3_amd64.deb
+Size: 102768
+MD5sum: 953eb8e19b57d6b7ffc6ef17382bb294
+SHA1: 3d630c3b688aef07786872bcc3fac1124220be32
+SHA256: 691c510ca66c71cd8e5632c8aa810e8d03489847764d391ffb6a5e5e84142252
+Section: utils
+Priority: optional
+Description: Push-to-talk local Whisper transcription for Linux
+ omnihear lets you hold a hotkey to record audio and have it
+ transcribed locally via faster-whisper (no cloud, no network calls
+ during use), then typed directly into whichever field has focus.
+ .
+ Works on X11 and Wayland (GNOME, KDE, wlroots). On Wayland, add your
+ user to the `input` group for hotkeys (`sudo usermod -aG input $USER`,
+ then re-login); typing uses a built-in /dev/uinput virtual keyboard
+ enabled by the bundled udev rule. Run `omnihear --doctor` to check
+ your setup.
+
+Package: omnihear
 Version: 1.2.0
 Architecture: amd64
 Maintainer: dsb <you@example.com>
