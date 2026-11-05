@@ -1474,11 +1474,13 @@ class DashboardHandler(BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass
 
-    def _send(self, code, body, ctype="application/json"):
+    def _send(self, code, body, ctype="application/json", headers=()):
         data = body if isinstance(body, bytes) else json.dumps(body).encode()
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))
+        for name, value in headers:
+            self.send_header(name, value)
         self.end_headers()
         self.wfile.write(data)
 
@@ -1510,7 +1512,16 @@ class DashboardHandler(BaseHTTPRequestHandler):
                                         if sys.platform in ("win32", "darwin")
                                         else ["auto", "pynput", "xdotool",
                                               "ydotool", "wtype"])))
-            self._send(200, page.encode(), "text/html; charset=utf-8")
+            # Anti-clickjacking: refuse to be framed by any page. The
+            # _request_allowed() CSRF guard can't help here, since requests
+            # made by a framed dashboard are same-origin. Only
+            # frame-ancestors -- a fuller CSP would block PAGE's inline
+            # <script>/<style>. Nothing legitimately frames the dashboard
+            # (tray.py opens it top-level).
+            self._send(200, page.encode(), "text/html; charset=utf-8",
+                       headers=(("X-Frame-Options", "DENY"),
+                                ("Content-Security-Policy",
+                                 "frame-ancestors 'none'")))
         elif url.path == "/api/history":
             if db is None:
                 self._send(200, [])
