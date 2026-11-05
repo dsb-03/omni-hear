@@ -32,6 +32,13 @@ KEY_DISPLAY_NAMES = {
 }
 
 
+# Text-injection backends. "uinput" is omnihear's built-in Wayland typer
+# (/dev/uinput, any compositor); xdotool is X11; ydotool/wtype are external
+# Wayland tools. Linux-only ones are rejected on Windows/macOS.
+LINUX_TYPE_METHODS = ("uinput", "xdotool", "ydotool", "wtype")
+TYPE_METHODS = ("auto", "pynput") + LINUX_TYPE_METHODS
+
+
 def hotkey_display(name: str) -> str:
     """Human-readable form of a canonical hotkey string, e.g.
     'ctrl_l+space' -> 'Ctrl Left + Space'."""
@@ -228,11 +235,11 @@ def validate_updates(updates: dict) -> tuple[dict, list[str]]:
     if "device" in clean and clean["device"] not in ("cpu", "cuda"):
         errors.append("device must be cpu or cuda")
         del clean["device"]
-    _TYPE_METHODS = ("auto", "pynput", "xdotool", "ydotool", "wtype")
+    _TYPE_METHODS = TYPE_METHODS
     if "type_method" in clean and clean["type_method"] not in _TYPE_METHODS:
         errors.append("type_method must be one of: " + ", ".join(_TYPE_METHODS))
         del clean["type_method"]
-    if ("type_method" in clean and clean["type_method"] in ("xdotool", "ydotool", "wtype")
+    if ("type_method" in clean and clean["type_method"] in LINUX_TYPE_METHODS
             and sys.platform in ("win32", "darwin")):
         errors.append(f"type_method '{clean['type_method']}' is only supported on Linux")
         del clean["type_method"]
@@ -242,7 +249,7 @@ def validate_updates(updates: dict) -> tuple[dict, list[str]]:
             from . import linux_session
             if linux_session.is_wayland():
                 errors.append("type_method 'xdotool' requires an X11 session "
-                              "(use auto, ydotool, or wtype on Wayland)")
+                              "(use auto, uinput, ydotool, or wtype on Wayland)")
                 del clean["type_method"]
         except Exception:
             pass

@@ -8,13 +8,33 @@ echo "omnihear: setting up Python virtual environment (requires internet access)
 python3 -m venv "$VENV_DIR"
 
 "$VENV_DIR/bin/pip" install --upgrade pip --quiet
-"$VENV_DIR/bin/pip" install --quiet -r "$APP_DIR/requirements.txt"
+# pynput >= 1.8 depends on `evdev`, which ships no wheels and needs gcc +
+# python3-dev to build -- not present on a fresh Ubuntu desktop. omnihear
+# only uses pynput's X11 backend (python-xlib) and has its own stdlib
+# evdev reader for Wayland, so install pynput without that dependency.
+grep -viE '^\s*pynput' "$APP_DIR/requirements.txt" > "$APP_DIR/.requirements-deb.txt"
+"$VENV_DIR/bin/pip" install --quiet -r "$APP_DIR/.requirements-deb.txt"
+# (deps first, then --no-deps, so pip doesn't print a scary resolver warning)
+"$VENV_DIR/bin/pip" install --quiet six python-xlib
+"$VENV_DIR/bin/pip" install --quiet --no-deps pynput
+rm -f "$APP_DIR/.requirements-deb.txt"
 
 chmod -R go+rX "$APP_DIR"
 
-echo "omnihear: installed. Run 'omnihear --help' to get started."
+# Wayland typing: load uinput and apply the bundled udev rule now, so the
+# logged-in user can open /dev/uinput without a reboot. Best-effort
+# (containers/chroots have no udev).
+modprobe uinput 2>/dev/null || true
+if command -v udevadm >/dev/null 2>&1; then
+    udevadm control --reload-rules 2>/dev/null || true
+    udevadm trigger --subsystem-match=misc --sysname-match=uinput 2>/dev/null || true
+fi
+
+echo "omnihear: installed. Run 'omnihear --doctor' to check your setup."
 echo "omnihear: to run it as a background service:"
 echo "             systemctl --user enable --now omnihear"
+echo "omnihear: on Wayland (Ubuntu 24.04+ default), hotkeys need the input group:"
+echo "             sudo usermod -aG input \$USER   # then log out and back in"
 echo "omnihear: web dashboard (when running): http://127.0.0.1:4738"
 echo "omnihear: on first run, the Whisper model weights will be downloaded"
 echo "             from Hugging Face (also requires internet, one-time per model size)."

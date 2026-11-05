@@ -1,8 +1,10 @@
 """Linux session detection + Wayland text injection.
 
-Hotkeys on Wayland live in evdev_hotkey.py. Typing shells out to
-ydotool (any compositor, via uinput) or wtype (wlroots compositors),
-matching how X11 already shells out to xdotool — no new pip deps.
+Hotkeys on Wayland live in evdev_hotkey.py. Typing prefers omnihear's own
+stdlib /dev/uinput keyboard (uinput_keyboard.py — works on GNOME, KDE and
+wlroots, no daemon), then shells out to ydotool (any compositor, needs
+ydotoold) or wtype (wlroots/Hyprland only), matching how X11 already
+shells out to xdotool — no new pip deps.
 """
 
 from __future__ import annotations
@@ -31,12 +33,45 @@ def is_wayland() -> bool:
     return session_type() == "wayland"
 
 
+def desktop() -> str:
+    """Lower-cased XDG_CURRENT_DESKTOP, e.g. 'ubuntu:gnome', 'kde'."""
+    return (os.environ.get("XDG_CURRENT_DESKTOP") or "").strip().lower()
+
+
+def is_gnome() -> bool:
+    d = desktop()
+    return "gnome" in d or "unity" in d
+
+
+def wtype_supported() -> bool:
+    """wtype needs zwp_virtual_keyboard_v1, which GNOME (Mutter) and KDE
+    (KWin) don't offer to regular clients — it errors out there."""
+    d = desktop()
+    return not (is_gnome() or "kde" in d or "plasma" in d)
+
+
+def has_ibus_unicode_entry() -> bool:
+    """Ctrl+Shift+U unicode entry is available (IBus, GNOME's default)."""
+    if is_gnome():
+        return True
+    return any((os.environ.get(v) or "").lower() == "ibus"
+               for v in ("GTK_IM_MODULE", "QT_IM_MODULE", "XMODIFIERS"))
+
+
+def uinput_available() -> bool:
+    from . import uinput_keyboard
+    return uinput_keyboard.available()
+
+
 def wayland_type_available() -> list[str]:
-    """Installed Wayland typers, preferred order."""
+    """Working Wayland typers for this desktop, preferred order."""
     found = []
-    for cmd in ("ydotool", "wtype"):
-        if shutil.which(cmd):
-            found.append(cmd)
+    if uinput_available():
+        found.append("uinput")
+    if shutil.which("ydotool"):
+        found.append("ydotool")
+    if shutil.which("wtype") and wtype_supported():
+        found.append("wtype")
     return found
 
 
@@ -53,15 +88,18 @@ def resolve_type_method(configured: str) -> str:
     if method == "auto" or (is_wayland() and method in ("pynput", "xdotool")):
         if is_wayland():
             avail = wayland_type_available()
-            # Prefer an installed typer; fall back to the name 'ydotool' so
-            # missing_wayland_deps() can print a clear apt install hint.
-            return avail[0] if avail else "ydotool"
+            # Prefer a working typer; fall back to 'uinput' so
+            # missing_wayland_deps() can print the /dev/uinput setup hint.
+            return avail[0] if avail else "uinput"
         return "pynput"
     return method
 
 
 def type_text(method: str, text: str) -> None:
-    if method == "xdotool":
+    if method == "uinput":
+        from . import uinput_keyboard
+        uinput_keyboard.default_keyboard().type(text)
+    elif method == "xdotool":
         subprocess.run(["xdotool", "type", "--clearmodifiers", "--", text],
                        check=False)
     elif method == "ydotool":
@@ -76,7 +114,10 @@ def type_text(method: str, text: str) -> None:
 def backspace(method: str, n: int) -> None:
     if n <= 0:
         return
-    if method == "xdotool":
+    if method == "uinput":
+        from . import uinput_keyboard
+        uinput_keyboard.default_keyboard().backspace(n)
+    elif method == "xdotool":
         subprocess.run(["xdotool", "key", "--repeat", str(n), "BackSpace"],
                        check=False)
     elif method == "ydotool":
@@ -93,6 +134,29 @@ def backspace(method: str, n: int) -> None:
         raise ValueError(f"unknown type method for Linux inject: {method}")
 
 
+def in_input_group_pending() -> bool:
+    """User is listed in the `input` group but this process predates it
+    (group changes only apply after logging out and back in)."""
+    try:
+        import grp
+        import pwd
+        user = pwd.getpwuid(os.getuid()).pw_name
+        gid = grp.getgrnam("input").gr_gid
+        listed = user in grp.getgrnam("input").gr_mem
+    except (KeyError, ImportError, OSError):
+        return False
+    return listed and gid not in os.getgroups()
+
+
+def _ydotool_socket_present() -> bool:
+    candidates = [os.environ.get("YDOTOOL_SOCKET") or ""]
+    runtime = os.environ.get("XDG_RUNTIME_DIR")
+    if runtime:
+        candidates.append(os.path.join(runtime, ".ydotool_socket"))
+    candidates.append("/tmp/.ydotool_socket")
+    return any(c and os.path.exists(c) for c in candidates)
+
+
 def missing_wayland_deps(type_method: str) -> list[str]:
     """Human-readable setup hints when Wayland prerequisites are missing."""
     hints = []
@@ -100,19 +164,35 @@ def missing_wayland_deps(type_method: str) -> list[str]:
         return hints
     from . import evdev_hotkey
     if not evdev_hotkey.keyboard_devices():
-        hints.append(
-            "hotkeys need read access to /dev/input/event* — "
-            "run `sudo usermod -aG input $USER` then log out and back in")
-    resolved = resolve_type_method(type_method)
-    if resolved in ("ydotool", "wtype") and not shutil.which(resolved):
-        hints.append(
-            f"text injection needs `{resolved}` "
-            f"(or the other of ydotool/wtype) — "
-            f"`sudo apt install ydotool` (any compositor) "
-            f"or `sudo apt install wtype` (wlroots: sway/hyprland)")
-        if resolved == "ydotool":
+        if in_input_group_pending():
             hints.append(
-                "ydotool also needs its daemon: "
-                "`systemctl --user enable --now ydotoold` "
-                "(or run `ydotoold` in the background)")
+                "you were added to the `input` group but this login predates "
+                "it — log out and back in so hotkeys can read your keyboard")
+        else:
+            hints.append(
+                "hotkeys need read access to /dev/input/event* — "
+                "run `sudo usermod -aG input $USER` then log out and back in")
+    resolved = resolve_type_method(type_method)
+    if resolved == "uinput" and not uinput_available():
+        hints.append(
+            "text injection needs write access to /dev/uinput — the omnihear "
+            ".deb installs a udev rule for this; if you run from source: "
+            "`sudo cp udev/70-omnihear-uinput.rules /usr/lib/udev/rules.d/ && "
+            "sudo modprobe uinput && sudo udevadm trigger --sysname-match=uinput`"
+            " (or install ydotool)")
+    elif resolved in ("ydotool", "wtype") and not shutil.which(resolved):
+        hints.append(
+            f"text injection needs `{resolved}` — `sudo apt install {resolved}`"
+            " (or set type_method = \"auto\" to use omnihear's built-in "
+            "uinput typer)")
+    if resolved == "wtype" and not wtype_supported():
+        hints.append(
+            "wtype does not work on GNOME/KDE (no virtual-keyboard protocol) — "
+            "set type_method = \"auto\" or \"uinput\"")
+    if (resolved == "ydotool" and shutil.which("ydotool")
+            and not _ydotool_socket_present()):
+        hints.append(
+            "ydotool needs its daemon running "
+            "(`systemctl --user enable --now ydotool` or `ydotoold &`) — "
+            "or use type_method = \"uinput\", which needs no daemon")
     return hints

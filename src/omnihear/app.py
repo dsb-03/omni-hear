@@ -18,6 +18,11 @@ from . import config as config_mod
 from .config import SPECIAL_KEY_NAMES
 
 
+def linux_session_methods():
+    """type_method values handled by linux_session (vs. pynput)."""
+    return ("xdotool", "ydotool", "wtype", "uinput")
+
+
 def resolve_key(name):
     """Resolve a single canonical key name to a pynput key object."""
     from pynput import keyboard
@@ -64,7 +69,13 @@ class RecordingOverlay:
         except ImportError:
             return
 
-        self.root = tk.Tk()
+        try:
+            # Under Wayland this is an XWayland window; with no X display
+            # at all (XWayland disabled) just run without the overlay.
+            self.root = tk.Tk()
+        except tk.TclError:
+            self.root = None
+            return
         self.root.overrideredirect(True)
         self.root.attributes("-topmost", True)
 
@@ -254,7 +265,7 @@ class App:
     # -- typing -------------------------------------------------------
     def _type_text(self, text):
         method = self._type_method
-        if method in ("xdotool", "ydotool", "wtype"):
+        if method in linux_session_methods():
             from . import linux_session
             linux_session.type_text(method, text)
             return
@@ -265,7 +276,7 @@ class App:
         if n <= 0:
             return
         method = self._type_method
-        if method in ("xdotool", "ydotool", "wtype"):
+        if method in linux_session_methods():
             from . import linux_session
             linux_session.backspace(method, n)
             return

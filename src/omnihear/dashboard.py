@@ -1144,7 +1144,7 @@ const HELP = {
   hotkey: 'Key (or +-combo) to hold down to record. Release to transcribe and type.',
   sample_rate: 'Microphone recording sample rate in Hz.',
   min_duration: 'Ignore recordings shorter than this many seconds (avoids accidental taps).',
-  type_method: 'How transcribed text is typed into the focused field. auto picks pynput on X11/Windows/macOS and ydotool/wtype on Wayland.',
+  type_method: 'How transcribed text is typed into the focused field. auto picks pynput on X11/Windows/macOS; on Wayland the built-in uinput typer (any compositor), else ydotool, or wtype on wlroots.',
   vad_filter: 'Trim silence/noise before transcription using Silero VAD. Reduces hallucinated text on quiet clips.',
   no_speech_threshold: 'Segments with a no-speech probability above this are treated as silence, not text.',
   log_prob_threshold: 'Segments whose average log-probability falls below this are considered low-confidence.',
@@ -1508,8 +1508,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     .replace("__TYPE_METHODS__",
                              json.dumps(["auto", "pynput"]
                                         if sys.platform in ("win32", "darwin")
-                                        else ["auto", "pynput", "xdotool",
-                                              "ydotool", "wtype"])))
+                                        else list(config_mod.TYPE_METHODS))))
             self._send(200, page.encode(), "text/html; charset=utf-8")
         elif url.path == "/api/history":
             if db is None:
