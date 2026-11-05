@@ -18,8 +18,14 @@ PAGE = """<!DOCTYPE html>
 <title>Omnihear Dashboard</title>
 <!-- Favicon: Inline SVG Logo -->
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3csvg width='200' height='200' viewBox='0 0 200 200' fill='none' xmlns='http://www.w3.org/2000/svg'%3e%3cdefs%3e%3clinearGradient id='waveGradient' x1='40' y1='100' x2='160' y2='100' gradientUnits='userSpaceOnUse'%3e%3cstop offset='0%25' stop-color='%233498db'/%3e%3cstop offset='100%25' stop-color='%232ecc71'/%3e%3c/linearGradient%3e%3c/defs%3e%3crect x='20' y='20' width='160' height='160' rx='25' fill='%232c3e50'/%3e%3cpath d='M50 100 C 60 80, 70 80, 80 100 C 90 120, 100 120, 110 100 C 120 70, 130 70, 140 100' stroke='url(%23waveGradient)' stroke-width='12' stroke-linecap='round' fill='none'/%3e%3ccircle cx='50' cy='100' r='6' fill='%233498db'/%3e%3ccircle cx='150' cy='100' r='6' fill='%232ecc71'/%3e%3c/svg%3e">
+<!-- No web fonts: the dashboard must work offline and never call out to a
+     CDN, so the stacks below prefer locally installed Inter/Outfit and fall
+     back to the platform UI font. -->
 <style>
 :root {
+  --font-body: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-display: 'Outfit', 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: ui-monospace, 'JetBrains Mono', SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', monospace;
   --surface: #f1f5f9;
   --card: rgba(255, 255, 255, 0.75);
   --card-solid: #ffffff;
@@ -32,6 +38,13 @@ PAGE = """<!DOCTYPE html>
   --shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.04);
   --glass-blur: backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
   --radius: 12px;
+  --ok: #047857;
+  --ok-soft: rgba(16, 185, 129, 0.13);
+  --warn: #b45309;
+  --warn-soft: rgba(245, 158, 11, 0.15);
+  --fail: #dc2626;
+  --fail-soft: rgba(239, 68, 68, 0.11);
+  --code-bg: rgba(15, 23, 42, 0.045);
 }
 :root[data-theme="dark"] {
   --surface: #0b0f19;
@@ -44,6 +57,13 @@ PAGE = """<!DOCTYPE html>
   --accent-soft: rgba(96, 165, 250, 0.12);
   --accent-gradient: linear-gradient(135deg, #60a5fa, #3b82f6);
   --shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.3);
+  --ok: #34d399;
+  --ok-soft: rgba(52, 211, 153, 0.13);
+  --warn: #fbbf24;
+  --warn-soft: rgba(251, 191, 36, 0.13);
+  --fail: #f87171;
+  --fail-soft: rgba(248, 113, 113, 0.13);
+  --code-bg: rgba(148, 163, 184, 0.1);
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -57,14 +77,22 @@ PAGE = """<!DOCTYPE html>
     --accent-soft: rgba(96, 165, 250, 0.12);
     --accent-gradient: linear-gradient(135deg, #60a5fa, #3b82f6);
     --shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.3);
+    --ok: #34d399;
+    --ok-soft: rgba(52, 211, 153, 0.13);
+    --warn: #fbbf24;
+    --warn-soft: rgba(251, 191, 36, 0.13);
+    --fail: #f87171;
+    --fail-soft: rgba(248, 113, 113, 0.13);
+    --code-bg: rgba(148, 163, 184, 0.1);
   }
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
+[hidden] { display: none !important; }
 body {
   background: var(--surface);
   color: var(--text);
-  font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  font-family: var(--font-body);
   line-height: 1.6;
   min-height: 100vh;
   transition: background 0.3s ease, color 0.3s ease;
@@ -95,7 +123,7 @@ header {
   gap: 12px;
 }
 .brand-name {
-  font-family: 'Outfit', 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  font-family: var(--font-display);
   font-size: 22px;
   font-weight: 800;
   background: var(--accent-gradient);
@@ -238,7 +266,7 @@ nav a.active {
   color: var(--accent);
   padding: 3px 8px;
   border-radius: 6px;
-  font-family: monospace;
+  font-family: var(--font-mono);
   font-weight: 600;
   border: 1px solid rgba(96, 165, 250, 0.2);
 }
@@ -252,7 +280,7 @@ nav a.active {
 }
 
 h2 {
-  font-family: 'Outfit', 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  font-family: var(--font-display);
   font-size: 18px;
   font-weight: 700;
   margin: 28px 0 12px;
@@ -284,7 +312,7 @@ h2 {
 .tile .v {
   font-size: 24px;
   font-weight: 700;
-  font-family: 'Outfit', 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  font-family: var(--font-display);
   color: var(--text);
 }
 .tile .l {
@@ -322,7 +350,7 @@ h2 {
   cursor: pointer;
 }
 .axis {
-  font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  font-family: var(--font-body);
   font-size: 11px;
   fill: var(--text-muted);
 }
@@ -495,12 +523,19 @@ label.check input:checked ~ .switch-slider::before {
   transform: translateX(20px);
 }
 
-/* Hotkey Capture button */
-#hotkey-capture {
-  width: 100%;
+/* Hotkey Capture buttons (any [data-capture-key]) */
+.hk-row {
+  display: flex;
+  gap: 8px;
   margin-top: 6px;
+}
+.hotkey-capture {
+  flex: 1;
+  min-width: 0;
   text-align: center;
   padding: 10px;
+  font-family: inherit;
+  font-size: 13px;
   font-weight: 600;
   border: 1px dashed var(--border);
   background: var(--card-solid);
@@ -508,18 +543,37 @@ label.check input:checked ~ .switch-slider::before {
   border-radius: 8px;
   cursor: pointer;
   transition: all 0.2s ease;
+  text-transform: none;
 }
-#hotkey-capture:hover {
+.hotkey-capture.empty {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+.hotkey-capture:hover {
   border-color: var(--accent);
   background: var(--accent-soft);
   color: var(--accent);
 }
-#hotkey-capture.capturing {
+.hotkey-capture.capturing {
   border-color: #ef4444;
   background: rgba(239, 68, 68, 0.08);
   color: #ef4444;
   animation: pulse-border 1.5s infinite;
 }
+.hk-clear {
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--card-solid);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.hk-clear:hover:not(:disabled) { border-color: var(--fail); color: var(--fail); background: var(--fail-soft); }
+.hk-clear:disabled { opacity: 0.45; cursor: default; }
 @keyframes pulse-border {
   0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
   70% { box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); }
@@ -607,6 +661,12 @@ tr.clickable td { transition:background 0.15s,color 0.15s; }
 .log-field-label { font-size:11px; font-weight:700; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; }
 .log-field-value { font-size:14px; font-weight:500; color:var(--text); word-break:break-word; }
 .log-field-value.main-text { font-size:16px; font-weight:600; line-height:1.6; }
+#log-corr {
+  display:block; width:100%; resize:vertical; padding:10px 12px;
+  border-radius:8px; border:1px solid var(--border); background:var(--card-solid); color:var(--text);
+  font-family:inherit; font-size:15px; line-height:1.5; transition:border-color 0.2s, box-shadow 0.2s;
+}
+#log-corr:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft); }
 /* Pagination bars */
 .pagination-bar { display:flex; align-items:center; justify-content:flex-end; gap:8px; padding-top:16px; font-size:13px; color:var(--text-muted); }
 .log-pag-bar { display:flex; align-items:center; justify-content:center; gap:16px; padding:28px 0 8px; font-size:13px; color:var(--text-muted); }
@@ -617,6 +677,313 @@ tr.clickable td { transition:background 0.15s,color 0.15s; }
 }
 .pag-btn:hover:not(:disabled) { border-color:var(--accent); color:var(--accent); background:var(--accent-soft); }
 .pag-btn:disabled { opacity:0.4; cursor:not-allowed; }
+
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+.ico {
+  width: 16px; height: 16px; flex: none;
+  fill: none; stroke: currentColor; stroke-width: 2;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+
+/* Status bar: hands-free lock */
+.status-bar.is-locked {
+  border-color: color-mix(in srgb, #ef4444 45%, var(--border));
+  background: color-mix(in srgb, #ef4444 7%, var(--card));
+}
+.locked-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  color: #ef4444; font-weight: 800; letter-spacing: 0.6px;
+}
+.locked-pill .ico { width: 15px; height: 15px; }
+
+/* Copy buttons (history rows, log detail, doctor commands) */
+.copy-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer; }
+.copy-btn .ico { width: 14px; height: 14px; }
+.copy-btn .ic-check { display: none; }
+.copy-btn.copied .ic-copy { display: none; }
+.copy-btn.copied .ic-check { display: inline; }
+.copy-btn.icon-only .cb-label { display: none; }
+.copy-btn.icon-only.copied .cb-label,
+.copy-btn.icon-only.manual .cb-label { display: inline; }
+.copy-btn.copied { color: var(--ok) !important; border-color: color-mix(in srgb, var(--ok) 45%, var(--border)) !important; }
+.copy-btn.manual { color: var(--warn) !important; border-color: color-mix(in srgb, var(--warn) 45%, var(--border)) !important; }
+.mini {
+  font-family: inherit; font-size: 12px; font-weight: 600; line-height: 1.2;
+  padding: 5px 8px; border-radius: 7px; border: 1px solid var(--border);
+  background: var(--card-solid); color: var(--text-muted);
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+  white-space: nowrap;
+}
+.mini:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+td.copy-cell, th.copy-cell { width: 1%; white-space: nowrap; text-align: right; padding-left: 4px; padding-right: 8px; }
+td.copy-cell { padding-top: 8px; padding-bottom: 8px; }
+td.ts { white-space: nowrap; color: var(--text-muted); font-size: 12px; }
+td.t-clip { font-weight: 600; max-width: 400px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+td.t-text { font-weight: 600; }
+
+/* Setup wizard (#/welcome) */
+.wiz-intro { color: var(--text-muted); font-size: 14px; margin: -4px 0 16px; }
+.wiz { padding: 24px; overflow: visible; }
+.wiz-progress {
+  list-style: none; display: flex; align-items: center;
+  margin: 0 0 24px; padding: 0 0 20px; border-bottom: 1px solid var(--border);
+}
+.wiz-progress li { display: flex; align-items: center; flex: 1 1 auto; min-width: 0; }
+.wiz-progress li:last-child { flex: 0 1 auto; }
+.wiz-progress li:not(:last-child)::after {
+  content: ""; flex: 1; height: 2px; min-width: 16px; margin: 0 14px;
+  background: var(--border); border-radius: 2px; transition: background 0.3s;
+}
+.wiz-progress li.done:not(:last-child)::after { background: var(--ok); }
+.wiz-progress a {
+  display: flex; align-items: center; gap: 10px; min-width: 0;
+  text-decoration: none; color: var(--text-muted);
+  font-size: 13px; font-weight: 600; white-space: nowrap;
+}
+.wiz-progress li.active a { color: var(--text); }
+.wiz-label { overflow: hidden; text-overflow: ellipsis; }
+.wiz-dot {
+  width: 30px; height: 30px; border-radius: 50%; flex: none;
+  display: grid; place-items: center;
+  border: 2px solid var(--border); background: var(--card-solid);
+  font-size: 13px; font-weight: 700; transition: all 0.2s ease;
+}
+.wiz-dot .ico { display: none; width: 15px; height: 15px; stroke-width: 3; }
+.wiz-progress li.active .wiz-dot { border-color: var(--accent); color: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
+.wiz-progress li.done .wiz-dot { background: var(--ok); border-color: var(--ok); color: #fff; }
+.wiz-progress li.done .wiz-dot .n { display: none; }
+.wiz-progress li.done .wiz-dot .ico { display: block; }
+.wiz-step:focus { outline: none; }
+.wiz-step h3 {
+  font-family: var(--font-display); font-size: 18px; font-weight: 700;
+  letter-spacing: -0.2px; margin-bottom: 4px;
+}
+.wiz-sub { color: var(--text-muted); font-size: 14px; margin-bottom: 18px; }
+.wiz-step-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.wiz-step-head .action { flex: none; white-space: nowrap; }
+.wiz-nav {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border);
+}
+.wiz-nav .spacer { flex: 1; }
+button.action:disabled { opacity: 0.45; cursor: default; transform: none; box-shadow: none; }
+button.action.primary.pulse { animation: next-pulse 1.6s ease-in-out infinite; }
+@keyframes next-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 45%, transparent); }
+  50% { box-shadow: 0 0 0 7px color-mix(in srgb, var(--accent) 0%, transparent); }
+}
+.link-btn {
+  font-family: inherit; font-size: 13px; font-weight: 600; color: var(--text-muted);
+  background: none; border: 0; padding: 6px 2px; cursor: pointer;
+  text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--border);
+}
+.link-btn:hover { color: var(--accent); text-decoration-color: currentColor; }
+.wiz a.inline-link { color: var(--accent); font-weight: 600; }
+
+/* Step 1: doctor checklist */
+.wiz-summary {
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px 14px; margin-bottom: 14px; border-radius: 10px;
+  font-weight: 600; font-size: 14px;
+  background: var(--code-bg); border: 1px solid var(--border);
+}
+.wiz-summary .ico { width: 18px; height: 18px; }
+.wiz-summary.ok { color: var(--ok); background: var(--ok-soft); border-color: color-mix(in srgb, var(--ok) 30%, transparent); }
+.wiz-summary.warn { color: var(--warn); background: var(--warn-soft); border-color: color-mix(in srgb, var(--warn) 30%, transparent); }
+.wiz-summary.fail { color: var(--fail); background: var(--fail-soft); border-color: color-mix(in srgb, var(--fail) 30%, transparent); }
+.wiz-summary .sum-sub { font-weight: 500; color: var(--text-muted); }
+.checklist { list-style: none; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.check-row {
+  display: grid; grid-template-columns: 66px minmax(110px, 190px) 1fr; gap: 12px;
+  align-items: baseline; padding: 11px 14px; border-bottom: 1px solid var(--border); font-size: 14px;
+}
+.check-row:last-child { border-bottom: 0; }
+.check-row.fail { background: color-mix(in srgb, var(--fail) 5%, transparent); }
+.check-label { font-weight: 600; overflow-wrap: anywhere; }
+.check-label::first-letter { text-transform: uppercase; }
+.check-detail { color: var(--text-muted); font-size: 13px; overflow-wrap: anywhere; }
+.chip {
+  display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+  font-size: 11px; font-weight: 700; letter-spacing: 0.4px; text-transform: uppercase;
+  padding: 2px 8px; border-radius: 999px; line-height: 1.6; width: 58px;
+}
+.chip .ico { width: 11px; height: 11px; stroke-width: 3; }
+.chip.ok { color: var(--ok); background: var(--ok-soft); }
+.chip.warn { color: var(--warn); background: var(--warn-soft); }
+.chip.fail { color: var(--fail); background: var(--fail-soft); }
+.cmd {
+  display: inline-flex; align-items: center; gap: 6px; max-width: 100%;
+  margin: 3px 2px; padding: 3px 3px 3px 9px; vertical-align: middle;
+  background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px;
+}
+.cmd code {
+  font-family: var(--font-mono); font-size: 12.5px; color: var(--text);
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.cmd .mini { padding: 3px 7px; }
+.skel { height: 14px; border-radius: 6px; background: var(--code-bg); animation: skel 1.2s ease-in-out infinite; }
+@keyframes skel { 50% { opacity: 0.45; } }
+.spinner {
+  width: 16px; height: 16px; flex: none; border-radius: 50%;
+  border: 2px solid var(--border); border-top-color: var(--accent);
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Step 2: hotkey + mic test */
+.hk-stage { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 28px; align-items: center; }
+.orb-col { display: flex; flex-direction: column; align-items: center; gap: 16px; text-align: center; }
+.wiz-keys { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 6px; min-height: 40px; }
+kbd.keycap {
+  display: inline-block; font-family: var(--font-mono); font-weight: 700; font-size: 14px;
+  padding: 6px 12px; border-radius: 8px; color: var(--text);
+  background: var(--card-solid); border: 1px solid var(--border); border-bottom-width: 3px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06); transition: transform 0.08s, border-color 0.08s, color 0.08s;
+}
+.wiz-keys.pressed kbd.keycap { transform: translateY(2px); border-bottom-width: 1px; border-color: #ef4444; color: #ef4444; }
+.keycap-plus { color: var(--text-muted); font-weight: 600; }
+.keys-inline kbd.keycap { font-size: 12px; padding: 1px 7px; border-bottom-width: 2px; }
+.keys-inline .keycap-plus { margin: 0 3px; }
+.rec-orb {
+  position: relative; width: 132px; height: 132px; border-radius: 50%;
+  display: grid; place-items: center;
+  background: var(--accent-soft); color: var(--accent);
+  border: 2px solid color-mix(in srgb, var(--accent) 25%, transparent);
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.rec-orb > .ico { width: 50px; height: 50px; stroke-width: 1.8; }
+.rec-orb.on {
+  background: radial-gradient(circle at 50% 38%, #f87171, #dc2626);
+  color: #fff; border-color: transparent; animation: orb-pulse 1.3s ease-out infinite;
+}
+.rec-orb .lock-badge {
+  display: none; position: absolute; right: 4px; bottom: 4px;
+  width: 38px; height: 38px; border-radius: 50%; place-items: center;
+  background: var(--card-solid); color: #ef4444; border: 2px solid #ef4444;
+}
+.rec-orb .lock-badge .ico { width: 18px; height: 18px; }
+.rec-orb.locked .lock-badge { display: grid; }
+@keyframes orb-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.5); }
+  75% { box-shadow: 0 0 0 22px rgba(239, 68, 68, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+}
+.orb-text { font-weight: 600; font-size: 14px; min-height: 44px; max-width: 320px; }
+.orb-text.rec { color: #ef4444; }
+.meter-label {
+  display: flex; justify-content: space-between; margin-bottom: 8px;
+  font-size: 11px; font-weight: 700; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: 0.5px;
+}
+.meter { display: flex; gap: 3px; height: 22px; }
+.meter i { flex: 1; border-radius: 3px; background: var(--code-bg); border: 1px solid var(--border); transition: background 0.08s; }
+.meter i.on { border-color: transparent; background: #10b981; }
+.meter i.on.y { background: #f59e0b; }
+.meter i.on.r { background: #ef4444; }
+.mini-checks { list-style: none; margin-top: 20px; display: grid; gap: 10px; }
+.mini-checks li { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 14px; color: var(--text-muted); }
+.mini-checks .tick {
+  width: 22px; height: 22px; border-radius: 50%; flex: none; display: grid; place-items: center;
+  border: 2px solid var(--border); color: transparent; transition: all 0.2s ease;
+}
+.mini-checks .tick .ico { width: 13px; height: 13px; stroke-width: 3; }
+.mini-checks li.done { color: var(--text); }
+.mini-checks li.done .tick { background: var(--ok); border-color: var(--ok); color: #fff; }
+.wiz-note {
+  margin-top: 16px; padding: 10px 12px; border-radius: 10px; font-size: 13px;
+  background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent);
+}
+.wiz-note.warn { background: var(--warn-soft); border-color: color-mix(in srgb, var(--warn) 30%, transparent); }
+.wiz-help {
+  margin-top: 22px; padding: 14px 16px; border-radius: 10px; font-size: 13px;
+  background: var(--warn-soft); border: 1px solid color-mix(in srgb, var(--warn) 30%, transparent);
+}
+.wiz-help b.h { display: block; font-size: 14px; margin-bottom: 6px; color: var(--warn); }
+.wiz-help ul { margin: 0 0 8px 18px; display: grid; gap: 4px; }
+.wiz-help code { font-family: var(--font-mono); font-size: 12px; }
+
+/* Step 3: practice dictation */
+#wiz-practice {
+  width: 100%; min-height: 120px; resize: vertical;
+  padding: 14px 16px; border-radius: 10px; border: 1px solid var(--border);
+  background: var(--card-solid); color: var(--text);
+  font-family: inherit; font-size: 16px; line-height: 1.5;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+#wiz-practice:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+#wiz-practice.rec { border-color: #ef4444; box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.15); }
+.practice-state {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  min-height: 34px; margin-top: 10px; font-size: 13px; font-weight: 600; color: var(--text-muted);
+}
+.practice-state.rec { color: #ef4444; }
+.practice-state.warn { color: var(--warn); }
+.practice-state.ok { color: var(--ok); }
+.practice-state .dot { width: 9px; height: 9px; border-radius: 50%; background: #ef4444; animation: text-blink 1s infinite; }
+.wiz-success {
+  position: relative; display: flex; gap: 14px; align-items: flex-start;
+  margin-top: 8px; padding: 16px; border-radius: 12px;
+  background: var(--ok-soft); border: 1px solid color-mix(in srgb, var(--ok) 35%, transparent);
+  animation: pop-in 0.35s cubic-bezier(0.2, 0.9, 0.3, 1.3);
+}
+.succ-icon {
+  width: 40px; height: 40px; border-radius: 50%; flex: none; display: grid; place-items: center;
+  background: var(--ok); color: #fff;
+}
+.succ-icon .ico { width: 22px; height: 22px; stroke-width: 3; }
+.succ-title { font-family: var(--font-display); font-weight: 700; font-size: 17px; color: var(--text); }
+.succ-text { font-size: 14px; color: var(--text); margin-top: 2px; overflow-wrap: anywhere; }
+.succ-text:empty { display: none; }
+@keyframes pop-in { from { transform: scale(0.94); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+.confetti { position: absolute; left: 34px; top: 34px; width: 0; height: 0; pointer-events: none; z-index: 2; }
+.confetti i {
+  position: absolute; width: 7px; height: 11px; border-radius: 2px; opacity: 0;
+  animation: confetti-burst 1.1s cubic-bezier(0.15, 0.7, 0.35, 1) forwards;
+}
+@keyframes confetti-burst {
+  0% { transform: translate(0, 0) rotate(0deg) scale(0.6); opacity: 1; }
+  80% { opacity: 1; }
+  100% { transform: translate(var(--x), var(--y)) rotate(var(--r)) scale(1); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .confetti { display: none; }
+  .rec-orb.on, button.action.primary.pulse, .wiz-success { animation: none; }
+}
+
+/* Phone width */
+@media (max-width: 720px) {
+  .wrap { padding: 16px 16px 48px; }
+  header { flex-wrap: wrap; gap: 10px 12px; padding: 12px 14px; margin-bottom: 16px; }
+  /* All five tabs fit on a 360px+ phone; anything narrower wraps (never hides a tab). */
+  nav { order: 3; width: 100%; margin: 0; gap: 2px; flex-wrap: wrap; justify-content: space-between; }
+  nav a { padding: 6px 8px; font-size: 13px; white-space: nowrap; }
+  .status-bar { flex-wrap: wrap; row-gap: 8px; padding: 12px 14px; margin-bottom: 16px; }
+  #status-text { flex: 1 1 210px; min-width: 0; }
+  .status-hotkey-container { margin-left: 22px; }
+  .card { padding: 16px; }
+  .wiz { padding: 18px 16px; }
+  .wiz-progress { margin-bottom: 18px; padding-bottom: 16px; }
+  .wiz-progress li:not(.active) .wiz-label { display: none; }
+  .wiz-progress li:not(:last-child)::after { margin: 0 8px; }
+  .wiz-step-head { flex-direction: column; gap: 4px; }
+  .wiz-step-head .action { align-self: flex-start; margin-bottom: 14px; }
+  .check-row { grid-template-columns: 66px minmax(0, 1fr); row-gap: 4px; }
+  .check-row .check-detail { grid-column: 1 / -1; }
+  .check-row .check-detail:empty { display: none; }
+  .hk-stage { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+  .wiz-nav .action { padding: 10px 16px; }
+  table .opt { display: none; }
+  td.ts .ts-d { display: block; }
+  td.t-clip { max-width: 0; width: 100%; }
+  .log-field { grid-template-columns: 1fr; gap: 6px; }
+}
+@media (max-width: 400px) {
+  header { padding: 12px 10px; }
+  nav a { padding: 6px 6px; }
+}
 </style>
 </head>
 <body>
@@ -643,6 +1010,7 @@ tr.clickable td { transition:background 0.15s,color 0.15s; }
       <a href="#/history" id="nav-history">History</a>
       <a href="#/settings" id="nav-settings">Settings</a>
       <a href="#/beta" id="nav-beta">Beta</a>
+      <a href="#/welcome" id="nav-welcome">Setup</a>
     </nav>
     <button id="theme-toggle" type="button" aria-label="Toggle Theme">
       <svg id="icon-moon" viewBox="0 0 24 24">
@@ -656,7 +1024,7 @@ tr.clickable td { transition:background 0.15s,color 0.15s; }
   </header>
 
   <!-- Live Status Bar -->
-  <div class="status-bar">
+  <div class="status-bar" id="status-bar">
     <span class="indicator" id="status-pulse"></span>
     <span id="status-text">loading status…</span>
     <div class="status-hotkey-container">
@@ -681,7 +1049,7 @@ tr.clickable td { transition:background 0.15s,color 0.15s; }
     <div class="card">
       <div class="table-container">
         <table>
-          <thead><tr><th>Time</th><th>Text</th><th class="num">Audio</th><th class="num">Latency</th></tr></thead>
+          <thead><tr><th>Time</th><th>Text</th><th class="num opt">Audio</th><th class="num opt">Latency</th><th class="copy-cell"><span class="sr-only">Copy</span></th></tr></thead>
           <tbody id="dash-hist"></tbody>
         </table>
       </div>
@@ -695,7 +1063,7 @@ tr.clickable td { transition:background 0.15s,color 0.15s; }
       <div class="search-wrapper"><input id="q" placeholder="Search transcriptions…"></div>
       <div class="table-container">
         <table>
-          <thead><tr><th>Time</th><th>Text</th><th class="num">Audio</th><th class="num">Latency</th><th class="num">CPU</th><th class="num">Memory</th></tr></thead>
+          <thead><tr><th>Time</th><th>Text</th><th class="num opt">Audio</th><th class="num opt">Latency</th><th class="num opt">CPU</th><th class="num opt">Memory</th><th class="copy-cell"><span class="sr-only">Copy</span></th></tr></thead>
           <tbody id="hist"></tbody>
         </table>
       </div>
@@ -785,6 +1153,98 @@ tr.clickable td { transition:background 0.15s,color 0.15s; }
       </div>
     </div>
   </section>
+
+  <!-- First-run Setup Wizard -->
+  <section class="screen" id="screen-welcome">
+    <h2>Set up Omnihear</h2>
+    <p class="wiz-intro">Three quick steps and you&rsquo;re dictating. Everything runs locally on this computer.</p>
+    <div class="card wiz">
+      <ol class="wiz-progress" id="wiz-progress">
+        <li data-step="1"><a href="#/welcome?step=1"><span class="wiz-dot"><span class="n">1</span><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span><span class="wiz-label">Check your setup</span></a></li>
+        <li data-step="2"><a href="#/welcome?step=2"><span class="wiz-dot"><span class="n">2</span><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span><span class="wiz-label">Try your hotkey</span></a></li>
+        <li data-step="3"><a href="#/welcome?step=3"><span class="wiz-dot"><span class="n">3</span><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span><span class="wiz-label">Dictate something</span></a></li>
+      </ol>
+
+      <div class="wiz-step" id="wiz-step-1" tabindex="-1" aria-labelledby="wiz-h1">
+        <div class="wiz-step-head">
+          <div>
+            <h3 id="wiz-h1">Check your setup</h3>
+            <p class="wiz-sub">omnihear checked this computer for everything dictation needs. Fix anything marked <b>Fail</b>, then re-check. Warnings are optional.</p>
+          </div>
+          <button class="action" id="wiz-recheck" type="button">Re-check</button>
+        </div>
+        <div class="wiz-summary" id="wiz-summary" aria-live="polite"></div>
+        <ul class="checklist" id="wiz-checks"></ul>
+      </div>
+
+      <div class="wiz-step" id="wiz-step-2" tabindex="-1" aria-labelledby="wiz-h2" hidden>
+        <h3 id="wiz-h2">Try your hotkey</h3>
+        <p class="wiz-sub">Hold your push-to-talk key and say a few words, then let go. Nothing is typed into this page on this step.</p>
+        <div class="hk-stage">
+          <div class="orb-col">
+            <div class="wiz-keys" id="wiz-keys" data-hotkey-caps></div>
+            <div class="rec-orb" id="wiz-orb">
+              <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3M8.5 21h7"/></svg>
+              <span class="lock-badge"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></span>
+            </div>
+            <div class="orb-text" id="wiz-orb-text" aria-live="polite">Hold your hotkey and say something&hellip;</div>
+          </div>
+          <div>
+            <div class="meter-label"><span>Microphone level</span><span id="wiz-level-txt">&ndash;</span></div>
+            <div class="meter" id="wiz-meter" role="meter" aria-label="Microphone level" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div>
+            <ul class="mini-checks">
+              <li id="wiz-c-hotkey"><span class="tick"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span>Hotkey works</li>
+              <li id="wiz-c-mic"><span class="tick"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span>Microphone works</li>
+              <li id="wiz-c-lock" hidden><span class="tick"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span>Hands-free lock works</li>
+            </ul>
+            <div class="wiz-note" id="wiz-handsfree" hidden><b>Hands-free is on.</b> Double-tap your hotkey to lock recording on, talk as long as you like, then tap it once more to stop and transcribe.</div>
+          </div>
+        </div>
+        <div class="wiz-help" id="wiz-help" hidden>
+          <b class="h">Nothing happening? Likely fixes:</b>
+          <ul>
+            <li>Hold exactly <span class="keys-inline" data-hotkey-caps></span> &mdash; some keyboards have no right-hand Ctrl or Alt. You can pick another key in <a class="inline-link" href="#/settings">Settings</a> (then restart omnihear).</li>
+            <li data-os="linux">On Wayland, omnihear reads the keyboard directly and needs the <code>input</code> group &mdash; Step 1 shows the exact command.</li>
+            <li data-os="darwin">Allow omnihear under <b>Input Monitoring</b> and <b>Accessibility</b> (System Settings &rarr; Privacy &amp; Security), then quit and reopen it.</li>
+            <li>Another program (a game, remote-desktop or screen-sharing tool) may be grabbing that key.</li>
+          </ul>
+          <a class="inline-link" href="#/welcome?step=1">&larr; Back to Step 1: check your setup</a>
+        </div>
+        <div class="wiz-help" id="wiz-mic-help" hidden>
+          <b class="h">Your hotkey works, but the microphone sounds silent</b>
+          <ul>
+            <li>Check the mic isn&rsquo;t muted and is the default input in your system sound settings.</li>
+            <li>Several microphones? <code>omnihear --list-devices</code> lists them; set <code>input_device</code> in config.toml.</li>
+            <li data-os="darwin">Allow omnihear under <b>Microphone</b> in System Settings &rarr; Privacy &amp; Security.</li>
+          </ul>
+          <a class="inline-link" href="#/welcome?step=1">&larr; Step 1 shows the microphones omnihear found</a>
+        </div>
+      </div>
+
+      <div class="wiz-step" id="wiz-step-3" tabindex="-1" aria-labelledby="wiz-h3" hidden>
+        <h3 id="wiz-h3">Dictate something</h3>
+        <p class="wiz-sub">Click in the box, hold <span class="keys-inline" data-hotkey-caps></span> and say something like <i>&ldquo;Hello, this is my first dictation&rdquo;</i>. When you let go, omnihear types it wherever your cursor is.</p>
+        <textarea id="wiz-practice" rows="4" placeholder="Your words will appear here&hellip;" aria-label="Practice dictation box"></textarea>
+        <div class="practice-state" id="wiz3-state" aria-live="polite"></div>
+        <div class="wiz-success" id="wiz3-success" hidden>
+          <div class="succ-icon"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></div>
+          <div style="flex:1;min-width:0;">
+            <div class="succ-title" id="wiz3-title">It works &mdash; you&rsquo;re ready to dictate!</div>
+            <div class="succ-text" id="wiz3-heard"></div>
+            <div class="wiz-note warn" id="wiz3-nottyped" hidden>omnihear heard you, but the text didn&rsquo;t land in the box. Keep the box focused while you speak, or check the typing rows in <a class="inline-link" href="#/welcome?step=1">Step 1</a>.</div>
+            <button class="link-btn" id="wiz3-again" type="button">Try again</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="wiz-nav">
+        <button class="link-btn" id="wiz-skip" type="button">Skip setup</button>
+        <span class="spacer"></span>
+        <button class="action" id="wiz-back" type="button">&larr; Back</button>
+        <button class="action primary" id="wiz-next" type="button">Next &rarr;</button>
+      </div>
+    </div>
+  </section>
 </div>
 
 
@@ -793,6 +1253,24 @@ const $ = s => document.querySelector(s);
 const esc = s => String(s).replace(/[&<>"]/g,
   c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const api = (p, opts) => fetch(p, opts).then(r => r.json());
+const PLATFORM = __PLATFORM__;  // sys.platform of the machine serving (and viewing) this page
+
+// localStorage can throw (blocked site data, some private modes): never let
+// that take the page down.
+function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+const ONBOARD_KEY = 'omnihear-onboarded';
+
+// Inline icons (stroke = currentColor, sized by .ico)
+const svgIco = (body, cls) => `<svg class="ico${cls ? ' ' + cls : ''}" viewBox="0 0 24 24" aria-hidden="true">${body}</svg>`;
+const ICON = {
+  copy: svgIco('<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/>', 'ic-copy'),
+  copied: svgIco('<path d="M5 12.5l4.5 4.5L19 7.5"/>', 'ic-check'),
+  check: svgIco('<path d="M5 12.5l4.5 4.5L19 7.5"/>'),
+  warn: svgIco('<path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17.5v.01"/>'),
+  fail: svgIco('<path d="M6 6l12 12M18 6L6 18"/>'),
+  lock: svgIco('<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>'),
+};
 
 // --- Theme Management ---
 const effectiveTheme = () => document.documentElement.dataset.theme ||
@@ -804,14 +1282,14 @@ function updateThemeIcon() {
   $('#icon-moon').style.display = dark ? 'none' : 'block';
 }
 
-const savedTheme = localStorage.getItem('omnihear-theme');
+const savedTheme = lsGet('omnihear-theme');
 if (savedTheme) document.documentElement.dataset.theme = savedTheme;
 updateThemeIcon();
 
 $('#theme-toggle').addEventListener('click', () => {
   const next = effectiveTheme() === 'dark' ? 'light' : 'dark';
   document.documentElement.dataset.theme = next;
-  localStorage.setItem('omnihear-theme', next);
+  lsSet('omnihear-theme', next);
   updateThemeIcon();
 });
 
@@ -828,7 +1306,8 @@ function route() {
   const isLog  = h.startsWith('#/log');
   const isSett = h === '#/settings';
   const isBeta = h === '#/beta';
-  ['dashboard','history','log','settings','beta'].forEach(id => {
+  const isWelcome = h.startsWith('#/welcome');
+  ['dashboard','history','log','settings','beta','welcome'].forEach(id => {
     const el = document.getElementById('screen-' + id);
     if (el) el.classList.remove('active');
   });
@@ -836,7 +1315,12 @@ function route() {
   $('#nav-history').classList.toggle('active', isHist || isLog);
   $('#nav-settings').classList.toggle('active', isSett);
   $('#nav-beta').classList.toggle('active', isBeta);
-  if (isBeta) {
+  $('#nav-welcome').classList.toggle('active', isWelcome);
+  if (!isWelcome) { wizStop(); wiz.step = 0; }  // leaving the wizard stops its polling
+  if (isWelcome) {
+    document.getElementById('screen-welcome').classList.add('active');
+    wizShow(parseInt(hashParams().get('step') || '1', 10));
+  } else if (isBeta) {
     document.getElementById('screen-beta').classList.add('active');
     loadBeta();
   } else if (isLog) {
@@ -857,16 +1341,30 @@ function route() {
     loadDashboard();
   }
 }
-window.addEventListener('hashchange', route);
-route();
+// The first route() runs from the startup section at the end of this script,
+// once every top-level `let`/`const` it touches has been initialised.
 
 function fmtSec(s) { return s >= 60 ? (s/60).toFixed(1)+' min' : s.toFixed(1)+' s'; }
 
 // --- Live State Polling & Updates ---
 let isRecording = false;
+let lastStatus = null;
+
+// Only touch the DOM when the markup changes, so polling (up to every
+// 120 ms in the setup wizard) doesn't restart CSS animations or make
+// screen readers re-announce live regions.
+function setHTML(el, html) {
+  if (el._html !== html) { el.innerHTML = html; el._html = html; }
+}
 
 async function loadStatus() {
-  const s = await api('/api/status');
+  let s;
+  try { s = await api('/api/status'); } catch (e) { return; }
+  renderStatus(s);
+}
+
+function renderStatus(s) {
+  lastStatus = s;
   const pulse = $('#status-pulse');
   const text = $('#status-text');
   const logo = $('#header-logo');
@@ -878,11 +1376,21 @@ async function loadStatus() {
     refreshCurrentScreen();
   }
 
-  if (isRecording) {
+  $('#status-bar').classList.toggle('is-locked', !!s.locked);
+  if (s.locked) {
+    // Hands-free: recording continues without holding the key.
     pulse.className = 'indicator pulse-active';
-    text.innerHTML = '<span class="listening-text-glow">● LISTENING</span> - speak now...';
+    setHTML(text, `<span class="locked-pill">${ICON.lock}LOCKED</span> &mdash; tap your hotkey to stop` +
+      (s.recording_mode === 'ask' ? ' &middot; listening for a question' : ''));
+    logo.classList.add('listening-anim');
+  } else if (isRecording) {
+    pulse.className = 'indicator pulse-active';
+    setHTML(text, s.recording_mode === 'ask'
+      ? '<span class="listening-text-glow">● LISTENING</span> for a question - ask away...'
+      : '<span class="listening-text-glow">● LISTENING</span> - speak now...');
     logo.classList.add('listening-anim');
   } else {
+    text._html = null;
     logo.classList.remove('listening-anim');
     if (s.model_loaded) {
       pulse.className = 'indicator pulse-loaded';
@@ -953,14 +1461,121 @@ async function loadDashboard() {
   ].map(([v,l]) => `<div class="tile"><div class="v">${esc(v)}</div><div class="l">${esc(l)}</div></div>`).join('');
   drawChart(st.per_day);
   $('#dash-hist').innerHTML = rows.map((r, i) =>
-    `<tr class="clickable" onclick="location.hash='#/log?offset=${i}&q=&total=${t.n}'">` +
-    `<td style="white-space:nowrap;color:var(--text-muted);font-size:12px;">${esc(r.ts.replace('T',' '))}</td>` +
-    `<td style="font-weight:600;max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(r.text)}</td>` +
-    `<td class="num">${r.audio_seconds ? r.audio_seconds.toFixed(1)+'s' : '–'}</td>` +
-    `<td class="num">${r.transcribe_ms ? Math.round(r.transcribe_ms)+'ms' : '–'}</td>` +
+    `<tr class="clickable" data-nav="${esc(logHref(i, '', t.n))}">` +
+    tsCell(r.ts) +
+    `<td class="t-clip">${esc(r.text)}</td>` +
+    `<td class="num opt">${r.audio_seconds ? r.audio_seconds.toFixed(1)+'s' : '–'}</td>` +
+    `<td class="num opt">${r.transcribe_ms ? Math.round(r.transcribe_ms)+'ms' : '–'}</td>` +
+    copyCell(r) +
     `</tr>`
-  ).join('') || `<tr><td colspan="4" style="text-align:center;padding:24px;color:var(--text-muted)">No transcriptions yet.</td></tr>`;
+  ).join('') || `<tr><td colspan="5" style="text-align:center;padding:24px;color:var(--text-muted)">No transcriptions yet.</td></tr>`;
 }
+
+// --- History rows: navigation + copy ---
+const logHref = (offset, q, total) => `#/log?offset=${offset}&q=${encodeURIComponent(q)}&total=${total}`;
+function tsCell(ts) {
+  const [d, t] = String(ts || '').split('T');
+  return `<td class="ts"><span class="ts-d">${esc(d)}</span> <span class="ts-t">${esc(t || '')}</span></td>`;
+}
+// What a row's Copy puts on the clipboard: the corrected text when there is one.
+function copyCell(r) {
+  const corrected = !!r.corrected_text;
+  return `<td class="copy-cell">` + copyBtn(r.corrected_text || r.text, {
+    iconOnly: true, title: corrected ? 'Copy corrected text' : 'Copy text', selectRow: !corrected,
+  }) + `</td>`;
+}
+function copyBtn(text, {label = 'Copy', title = 'Copy to clipboard', iconOnly = false,
+                        from = '', cls = 'mini', selectRow = false} = {}) {
+  const src = from ? `data-copy-from="${esc(from)}"` : `data-copy="${esc(text)}"`;
+  return `<button type="button" class="copy-btn ${cls}${iconOnly ? ' icon-only' : ''}" ${src}` +
+    (selectRow ? ' data-select-row="1"' : '') +
+    ` title="${esc(title)}" aria-label="${esc(title)}">` +
+    `${ICON.copy}${ICON.copied}<span class="cb-label">${esc(label)}</span></button>`;
+}
+
+// Copy with graceful fallbacks: async clipboard API (127.0.0.1 is a secure
+// context), then the legacy execCommand path, then select the text so the
+// user can press Ctrl+C themselves.
+async function copyText(text, btn, selectEl) {
+  let ok = false;
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text);
+      ok = true;
+    }
+  } catch (e) {}
+  if (!ok) ok = legacyCopy(text);
+  if (ok) { flashCopy(btn, 'Copied', 'copied'); return true; }
+  if (selectEl) {
+    selectContents(selectEl);
+    flashCopy(btn, (PLATFORM === 'darwin' ? '⌘C' : 'Ctrl+C') + ' to copy', 'manual', 4000);
+  } else {
+    flashCopy(btn, 'Copy failed', 'manual', 2500);
+  }
+  return false;
+}
+function legacyCopy(text) {
+  const prev = document.activeElement;
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.setAttribute('readonly', '');
+  ta.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;';
+  document.body.appendChild(ta);
+  let ok = false;
+  try { ta.select(); ok = document.execCommand('copy'); } catch (e) {}
+  ta.remove();
+  try { if (prev && prev.focus) prev.focus({preventScroll: true}); } catch (e) {}
+  return !!ok;
+}
+function selectContents(el) {
+  if (typeof el.select === 'function') { el.focus(); el.select(); return; }
+  const r = document.createRange();
+  r.selectNodeContents(el);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(r);
+}
+function flashCopy(btn, label, cls, ms = 1600) {
+  const lab = btn.querySelector('.cb-label');
+  if (btn.dataset.orig === undefined) btn.dataset.orig = lab ? lab.textContent : '';
+  clearTimeout(btn._flash);
+  btn.classList.remove('copied', 'manual');
+  btn.classList.add(cls);
+  if (lab) lab.textContent = label;
+  btn._flash = setTimeout(() => {
+    btn.classList.remove(cls);
+    if (lab) lab.textContent = btn.dataset.orig;
+    delete btn.dataset.orig;
+  }, ms);
+}
+
+// Copy buttons sit inside clickable rows: handle them in the capture phase
+// and stop the event there so the row never navigates.
+document.addEventListener('click', e => {
+  const btn = e.target.closest('.copy-btn');
+  if (!btn) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const src = btn.dataset.copyFrom ? document.querySelector(btn.dataset.copyFrom) : null;
+  const text = src ? (src.value != null ? src.value : src.textContent) : (btn.dataset.copy || '');
+  const chip = btn.closest('.cmd');
+  const row = btn.dataset.selectRow ? btn.closest('tr') : null;
+  const sel = src || (chip && chip.querySelector('code')) ||
+    (row && row.querySelector('.t-clip, .t-text')) || null;
+  copyText(text, btn, sel);
+}, true);
+
+// Row / pager navigation (delegated; rows ignore clicks on controls and
+// text selections). Hrefs live in data-nav so search text never ends up
+// inside an inline JS string.
+document.addEventListener('click', e => {
+  const navBtn = e.target.closest('button[data-nav]');
+  if (navBtn) { location.hash = navBtn.dataset.nav; return; }
+  const row = e.target.closest('tr[data-nav]');
+  if (!row || e.target.closest('a, button, input, textarea, select')) return;
+  if (String(window.getSelection() || '').length) return;
+  location.hash = row.dataset.nav;
+});
 
 async function loadStats() { await loadDashboard(); }
 
@@ -1011,15 +1626,16 @@ async function loadHistory() {
   const rows = await api(`/api/history?limit=${HIST_PAGE}&offset=${histOffset}&q=${encodeURIComponent(histQ)}`);
   $('#hist').innerHTML = rows.map((r, i) => {
     const abs = histOffset + i;
-    return `<tr class="clickable" onclick="location.hash='#/log?offset=${abs}&q=${encodeURIComponent(histQ)}&total=${histTotal}'">` +
-    `<td style="white-space:nowrap;color:var(--text-muted);font-size:12px;">${esc(r.ts.replace('T',' '))}</td>` +
-    `<td style="font-weight:600;">${esc(r.text)}</td>` +
-    `<td class="num">${r.audio_seconds ? r.audio_seconds.toFixed(1)+'s' : '–'}</td>` +
-    `<td class="num">${r.transcribe_ms ? Math.round(r.transcribe_ms)+'ms' : '–'}</td>` +
-    `<td class="num">${r.cpu_percent != null ? r.cpu_percent.toFixed(0)+'%' : '–'}</td>` +
-    `<td class="num">${r.memory_mb != null ? Math.round(r.memory_mb)+' MB' : '–'}</td>` +
+    return `<tr class="clickable" data-nav="${esc(logHref(abs, histQ, histTotal))}">` +
+    tsCell(r.ts) +
+    `<td class="t-text">${esc(r.text)}</td>` +
+    `<td class="num opt">${r.audio_seconds ? r.audio_seconds.toFixed(1)+'s' : '–'}</td>` +
+    `<td class="num opt">${r.transcribe_ms ? Math.round(r.transcribe_ms)+'ms' : '–'}</td>` +
+    `<td class="num opt">${r.cpu_percent != null ? r.cpu_percent.toFixed(0)+'%' : '–'}</td>` +
+    `<td class="num opt">${r.memory_mb != null ? Math.round(r.memory_mb)+' MB' : '–'}</td>` +
+    copyCell(r) +
     `</tr>`;
-  }).join('') || `<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--text-muted)">No transcriptions found.</td></tr>`;
+  }).join('') || `<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text-muted)">No transcriptions found.</td></tr>`;
   const hasPrev = histOffset > 0;
   const hasNext = rows.length === HIST_PAGE;
   const pg = Math.floor(histOffset / HIST_PAGE) + 1;
@@ -1062,13 +1678,14 @@ async function openLog(offset, q, total) {
   const corrHtml =
     `<div class="log-field">` +
     `<div class="log-field-label">Transcription${r.corrected_text ? ' (corrected)' : ''}</div>` +
-    `<textarea id="log-corr" rows="3" style="width:100%;box-sizing:border-box;` +
-    `font:inherit;margin-top:4px;">${esc(r.corrected_text || r.text)}</textarea>` +
-    `<div class="btn-group" style="margin-top:8px;">` +
+    `<div style="min-width:0;">` +
+    `<textarea id="log-corr" rows="3">${esc(r.corrected_text || r.text)}</textarea>` +
+    `<div class="btn-group" style="margin-top:10px;flex-wrap:wrap;">` +
     `<button class="action primary" id="log-corr-save" type="button">Save correction</button>` +
+    copyBtn('', {from: '#log-corr', cls: 'action', title: 'Copy transcript'}) +
     `<span id="log-corr-msg" style="font-size:13px;"></span></div>` +
-    (r.corrected_text ? `<div style="font-size:12px;color:var(--text-muted);margin-top:6px;">Original: ${esc(r.text)}</div>` : '') +
-    `</div>`;
+    (r.corrected_text ? `<div style="font-size:12px;color:var(--text-muted);margin-top:8px;">Original: ${esc(r.text)}</div>` : '') +
+    `</div></div>`;
   card.innerHTML = corrHtml + fields.map(([lbl, val]) =>
     `<div class="log-field">` +
     `<div class="log-field-label">${esc(lbl)}</div>` +
@@ -1089,9 +1706,9 @@ async function openLog(offset, q, total) {
   const hasNext = !histTotal || offset < histTotal - 1;
   const tot = histTotal ? ' / ' + histTotal : '';
   pag.innerHTML =
-    `<button class="pag-btn" onclick="location.hash='#/log?offset=${offset-1}&q=${encodeURIComponent(q)}&total=${histTotal}'" ${hasPrev?'':'disabled'}>← Previous</button>` +
+    `<button class="pag-btn" type="button" data-nav="${esc(logHref(offset - 1, q, histTotal))}" ${hasPrev?'':'disabled'}>← Previous</button>` +
     `<span style="min-width:90px;text-align:center;">${offset + 1}${tot}</span>` +
-    `<button class="pag-btn" onclick="location.hash='#/log?offset=${offset+1}&q=${encodeURIComponent(q)}&total=${histTotal}'" ${hasNext?'':'disabled'}>Next →</button>`;
+    `<button class="pag-btn" type="button" data-nav="${esc(logHref(offset + 1, q, histTotal))}" ${hasNext?'':'disabled'}>Next →</button>`;
 }
 
 // --- Configuration Form Construction ---
@@ -1099,12 +1716,13 @@ const KEY_NAMES = __KEY_NAMES__;
 const MODELS = __MODELS__;
 const LANGUAGE_NAMES = __LANGS__;
 const TYPE_METHODS = __TYPE_METHODS__;
+const CLEANUP_LEVELS = __CLEANUP_LEVELS__;
 const LANGUAGES = [['auto','Auto-detect Language']].concat(
   Object.entries(LANGUAGE_NAMES).map(([c,n]) => [c, `${n} (${c})`]));
 const COMPUTE_TYPES = ['int8','float16','int8_float16','float32'];
 const BOOLS = ['dashboard','notify','beep','history','verbose','vad_filter',
   'condition_on_previous_text','brain','brain_autocorrect','brain_hotwords','analytics',
-  'voice_commands','terminal_commands','rag_context'];
+  'voice_commands','terminal_commands','rag_context','hands_free'];
 const NUMBERS = {
   sample_rate: {min: 8000, step: 1000},
   beam_size: {min: 1, step: 1},
@@ -1117,6 +1735,7 @@ const NUMBERS = {
   brain_min_count: {min: 1, step: 1},
   rag_context_limit: {min: 1, max: 20, step: 1},
   ask_context_limit: {min: 1, max: 20, step: 1},
+  max_recording_seconds: {min: 10, max: 3600, step: 10},
 };
 // Beta-only settings: rendered on #/beta, never in #/settings.
 const BETA_KEYS = ['brain','brain_autocorrect','brain_hotwords','brain_min_count','analytics',
@@ -1125,6 +1744,7 @@ const BETA_KEYS = ['brain','brain_autocorrect','brain_hotwords','brain_min_count
 const SECTIONS = [
   ['Transcription Engine', ['model','language','device','compute_type','beam_size']],
   ['Input & Trigger', ['hotkey','sample_rate','min_duration','type_method']],
+  ['Dictation (new)', ['hands_free','max_recording_seconds','paste_last_hotkey','cleanup']],
   ['Hallucination Filtering', ['vad_filter','no_speech_threshold',
     'log_prob_threshold','compression_ratio_threshold','condition_on_previous_text']],
   ['Dashboard & SQLite DB', ['dashboard','dashboard_port','history']],
@@ -1140,7 +1760,11 @@ const HELP = {
   hotkey: 'Key (or +-combo) to hold down to record. Release to transcribe and type.',
   sample_rate: 'Microphone recording sample rate in Hz.',
   min_duration: 'Ignore recordings shorter than this many seconds (avoids accidental taps).',
-  type_method: 'How transcribed text is typed into the focused field. auto picks pynput on X11/Windows/macOS and ydotool/wtype on Wayland.',
+  type_method: 'How transcribed text is typed into the focused field. auto picks pynput on X11/Windows/macOS; on Wayland the built-in uinput typer (any compositor), else ydotool, or wtype on wlroots. paste (beta) pastes through the clipboard: instant for long text and works with any keyboard layout; your previous clipboard is restored.',
+  hands_free: 'Beta. Double-tap the hotkey to keep recording without holding it; tap once more to stop and transcribe.',
+  max_recording_seconds: 'Safety cap: recording stops and is transcribed after this many seconds (hands-free or held).',
+  paste_last_hotkey: 'Optional key/combo that puts your last transcript at the cursor again, for when it went to the wrong window. Empty disables it.',
+  cleanup: 'Beta. light: remove filler words (um, uh), stutters ("the the") and spoken self-corrections ("at 2, actually 3" becomes "at 3") before typing.',
   vad_filter: 'Trim silence/noise before transcription using Silero VAD. Reduces hallucinated text on quiet clips.',
   no_speech_threshold: 'Segments with a no-speech probability above this are treated as silence, not text.',
   log_prob_threshold: 'Segments whose average log-probability falls below this are considered low-confidence.',
@@ -1193,6 +1817,7 @@ function fieldHtml(k, v) {
            `<span>${pretty(k)}</span><div class="switch-slider"></div></label>`;
   if (k === 'device') return selectOf(k, ['cpu','cuda'], v);
   if (k === 'type_method') return selectOf(k, TYPE_METHODS, v);
+  if (k === 'cleanup') return selectOf(k, CLEANUP_LEVELS, v);
   if (k === 'compute_type') return selectOf(k, COMPUTE_TYPES, v);
   if (k === 'model')
     return customSelect(k,
@@ -1203,10 +1828,7 @@ function fieldHtml(k, v) {
       LANGUAGES.map(([c, lab]) =>
         `<option value="${c}"${c===v?' selected':''}>${esc(lab)}</option>`).join('') +
       `</select></label>`;
-  if (k === 'hotkey')
-    return `<label${titleAttr(k)}>hotkey (push to talk)` +
-      `<button type="button" id="hotkey-capture" data-value="${esc(v)}">` +
-      `${esc(keyDisplay(v))}</button></label>`;
+  if (k in CAPTURE_KEYS) return captureField(k, v);
   if (k in NUMBERS) {
     const n = NUMBERS[k];
     return `<label${titleAttr(k)}>${pretty(k)}<input type="number" name="${k}" value="${esc(v)}"` +
@@ -1227,33 +1849,81 @@ function codeToName(code, key) {
   if (CODE_MAP[code]) return CODE_MAP[code];
   let m = code.match(/^Key([A-Z])$/);   if (m) return m[1].toLowerCase();
   m = code.match(/^Digit([0-9])$/);     if (m) return m[1];
+  // '+' joins combo parts in the config, so it can't be a key itself.
+  if (key === '+') return null;
   // Punctuation / symbol keys (Backquote, Minus, BracketLeft, …)
   if (key && key.length === 1) return key.toLowerCase();
   return null;
 }
 
-let capture = null;
+// Every <button data-capture-key="..."> is a capture field; its value lives
+// in data-value ('' = not set). Optional keys get a Clear button.
+const CAPTURE_KEYS = {hotkey: false, paste_last_hotkey: true, ask_hotkey: true};  // key -> clearable
+const hkLabel = v => v ? keyDisplay(v) : 'Not set — click to record';
 
-function setupHotkeyCapture() {
-  const btn = $('#hotkey-capture');
-  if (!btn) return;
-  btn.addEventListener('click', () => {
-    if (capture) return;
-    capture = {seen: new Set(), active: new Set(), prev: btn.dataset.value};
-    btn.classList.add('capturing');
-    btn.textContent = 'Press keys combo… (Esc to cancel)';
-  });
+function captureField(k, v) {
+  v = v || '';
+  const label = k === 'hotkey' ? 'hotkey (push to talk)' : pretty(k);
+  return `<label${titleAttr(k)}>${label}<span class="hk-row">` +
+    `<button type="button" class="hotkey-capture${v ? '' : ' empty'}" data-capture-key="${k}"` +
+    ` data-value="${esc(v)}">${esc(hkLabel(v))}</button>` +
+    (CAPTURE_KEYS[k]
+      ? `<button type="button" class="hk-clear" data-clear-key="${k}" title="Clear (disables ${esc(pretty(k))})"` +
+        `${v ? '' : ' disabled'}>Clear</button>`
+      : '') +
+    `</span></label>`;
+}
+
+// Value of a capture field inside `root`, or undefined if it isn't rendered.
+function capturedValue(root, k) {
+  const b = root.querySelector(`[data-capture-key="${k}"]`);
+  return b ? (b.dataset.value || '') : undefined;
+}
+
+let capture = null;  // {btn, seen: Set(names, in press order), held: Set(codes), prev}
+
+function syncCaptureBtn(btn) {
+  const v = btn.dataset.value || '';
+  btn.textContent = hkLabel(v);
+  btn.classList.toggle('empty', !v);
+  const clr = document.querySelector(`[data-clear-key="${btn.dataset.captureKey}"]`);
+  if (clr) clr.disabled = !v;
+}
+
+function startCapture(btn) {
+  if (capture) endCapture(true);
+  capture = {btn, seen: new Set(), held: new Set(), prev: btn.dataset.value || ''};
+  btn.classList.add('capturing');
+  btn.textContent = 'Press keys combo… (Esc to cancel)';
 }
 
 function endCapture(canceled) {
-  const btn = $('#hotkey-capture');
-  if (!btn || !capture) return;
-  if (canceled || !capture.seen.size) btn.dataset.value = capture.prev;
-  else btn.dataset.value = [...capture.seen].join('+');
-  btn.textContent = keyDisplay(btn.dataset.value);
-  btn.classList.remove('capturing');
+  if (!capture) return;
+  const {btn, seen, prev} = capture;
   capture = null;
+  btn.dataset.value = (canceled || !seen.size) ? prev : [...seen].join('+');
+  btn.classList.remove('capturing');
+  syncCaptureBtn(btn);
 }
+
+document.addEventListener('click', e => {
+  const cap = e.target.closest('[data-capture-key]');
+  const clr = e.target.closest('[data-clear-key]');
+  // A click anywhere else abandons an unfinished capture.
+  if (capture && cap !== capture.btn) endCapture(true);
+  if (cap) {
+    e.preventDefault();
+    if (capture && capture.btn === cap) endCapture(true);
+    else startCapture(cap);
+  } else if (clr) {
+    e.preventDefault();
+    const btn = document.querySelector(`[data-capture-key="${clr.dataset.clearKey}"]`);
+    if (btn) { btn.dataset.value = ''; syncCaptureBtn(btn); }
+  }
+});
+
+// Losing focus mid-combo (e.g. the combo switched windows) keeps what was seen.
+window.addEventListener('blur', () => { if (capture) endCapture(!capture.seen.size); });
 
 document.addEventListener('keydown', e => {
   if (!capture) return;
@@ -1261,22 +1931,22 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape') { endCapture(true); return; }
   if (e.repeat) return;
   const name = codeToName(e.code, e.key);
-  const btn = $('#hotkey-capture');
   if (!name) {
-    btn.textContent = 'Key not supported';
+    capture.btn.textContent = 'Key not supported';
     return;
   }
   capture.seen.add(name);
-  capture.active.add(name);
-  btn.textContent = keyDisplay([...capture.seen].join('+'));
+  capture.held.add(e.code);
+  capture.btn.textContent = keyDisplay([...capture.seen].join('+'));
 });
 
 document.addEventListener('keyup', e => {
   if (!capture) return;
   e.preventDefault();
-  const name = codeToName(e.code, e.key);
-  if (name) capture.active.delete(name);
-  if (capture.seen.size && !capture.active.size) endCapture(false);
+  // Track held keys by physical code: a symbol's e.key can change between
+  // keydown and keyup (Shift released first: '?' down, '/' up).
+  capture.held.delete(e.code);
+  if (capture.seen.size && !capture.held.size) endCapture(false);
 });
 
 async function loadConfig() {
@@ -1285,7 +1955,6 @@ async function loadConfig() {
     `<div class="cfg-section"><h3>${title}</h3><div class="cfg-grid">` +
     keys.filter(k => k in cfg).map(k => fieldHtml(k, cfg[k])).join('') +
     `</div></div>`).join('');
-  setupHotkeyCapture();
   document.querySelectorAll('select[data-custom]').forEach(sel => {
     sel.addEventListener('change', () => {
       $('#' + sel.name + '-custom').style.display =
@@ -1303,10 +1972,12 @@ function showMsg(text, ok) {
 }
 
 async function saveConfig() {
+  if (capture) endCapture(true);
   const form = $('#cfg');
   const data = {};
   for (const [, keys] of SECTIONS) for (const k of keys) {
-    if (k === 'hotkey') { data[k] = $('#hotkey-capture').dataset.value; continue; }
+    const hk = capturedValue(form, k);
+    if (hk !== undefined) { data[k] = hk; continue; }
     const el = form.elements[k];
     if (!el) continue;
     if (BOOLS.includes(k)) data[k] = el.checked;
@@ -1405,9 +2076,12 @@ $('#brain-add-btn').addEventListener('click', async () => {
 });
 
 $('#beta-save').addEventListener('click', async () => {
+  if (capture) endCapture(true);
   const form = $('#beta-cfg');
   const data = {};
   for (const k of BETA_KEYS) {
+    const hk = capturedValue(form, k);
+    if (hk !== undefined) { data[k] = hk; continue; }
     const el = form.elements[k];
     if (!el) continue;
     data[k] = BOOLS.includes(k) ? el.checked : el.value;
@@ -1438,12 +2112,362 @@ $('#q').addEventListener('input', () => {
   }, 300);
 });
 
+// --- First-run setup wizard (#/welcome) ---
+// The step lives in the hash (#/welcome?step=N) so Back/Next, the browser's
+// back button and "back to step 1" links all go through route().
+const LEVEL_OK = 0.15;   // live mic level (0..1) that counts as "we can hear you"
+const METER_SEGS = 24;
+const wiz = {
+  step: 0, gen: 0, timer: null, helpTimer: null, fast: false, docReq: 0,
+  doctorOk: false, hk: null,
+  sawRec: false, sawVoice: false, sawLock: false, meter: 0, quietMs: 0, lastTick: 0,
+  baseId: 0, done3: false, rec3: false, stoppedAt: 0,
+};
+
+$('#wiz-meter').innerHTML = Array.from({length: METER_SEGS}, (_, i) =>
+  `<i class="${i >= METER_SEGS * 0.85 ? 'r' : i >= METER_SEGS * 0.65 ? 'y' : ''}"></i>`).join('');
+
+// Stops the wizard's pollers/timers. The generation counter makes any
+// request already in flight drop its result.
+function wizStop() {
+  wiz.gen++;
+  clearTimeout(wiz.timer);
+  clearTimeout(wiz.helpTimer);
+  wiz.timer = wiz.helpTimer = null;
+  wiz.fast = false;
+}
+// Self-scheduling poll (never overlaps a slow request), bound to this generation.
+function wizLoop(ms, fn) {
+  const gen = wiz.gen;
+  const tick = async () => {
+    if (gen !== wiz.gen) return;
+    try { await fn(gen); } catch (e) {}
+    if (gen === wiz.gen) wiz.timer = setTimeout(tick, ms);
+  };
+  tick();
+}
+
+function wizShow(n) {
+  n = Math.min(3, Math.max(1, n || 1));
+  wizStop();
+  wiz.step = n;
+  for (let k = 1; k <= 3; k++) $('#wiz-step-' + k).hidden = k !== n;
+  $('#wiz-back').disabled = n === 1;
+  const next = $('#wiz-next');
+  next.innerHTML = n === 3 ? 'Finish' : 'Next &rarr;';
+  next.classList.remove('pulse');
+  $('#wiz-skip').textContent = lsGet(ONBOARD_KEY) ? 'Close setup' : 'Skip setup';
+  wizRenderProgress();
+  // Park focus on the step: omnihear types into whatever has focus, and a
+  // transcribed space/Enter must not press a button here.
+  if (n !== 3) $('#wiz-step-' + n).focus({preventScroll: true});
+  if (n === 1) wizStep1();
+  else if (n === 2) wizStep2();
+  else wizStep3();
+}
+
+function wizRenderProgress() {
+  const done = {1: wiz.doctorOk, 2: wiz.sawRec && wiz.sawVoice, 3: wiz.done3};
+  document.querySelectorAll('#wiz-progress li').forEach(li => {
+    const k = +li.dataset.step;
+    li.classList.toggle('active', k === wiz.step);
+    li.classList.toggle('done', !!done[k]);
+    if (k === wiz.step) li.setAttribute('aria-current', 'step');
+    else li.removeAttribute('aria-current');
+  });
+}
+
+function wizGo(n) { location.hash = '#/welcome?step=' + n; }
+function wizFinish() { lsSet(ONBOARD_KEY, '1'); location.hash = '#/'; }
+
+function keycaps(hk, display) {
+  const parts = String(hk || '').split('+').filter(Boolean);
+  if (!parts.length) return `<kbd class="keycap">${esc(display || 'your hotkey')}</kbd>`;
+  return parts.map(p => `<kbd class="keycap">${esc(KEY_NAMES[p] || p.toUpperCase())}</kbd>`)
+    .join('<span class="keycap-plus">+</span>');
+}
+function wizDrawKeys(s) {
+  const hk = (s && s.hotkey) || '';
+  if (hk === wiz.hk) return;
+  wiz.hk = hk;
+  const html = keycaps(hk, s && s.hotkey_display);
+  document.querySelectorAll('[data-hotkey-caps]').forEach(el => { el.innerHTML = html; });
+}
+
+// Step 1: doctor checklist
+function chipHtml(st) {
+  const [icon, label] = st === 'ok' ? [ICON.check, 'OK'] : st === 'warn' ? [ICON.warn, 'Warn'] : [ICON.fail, 'Fail'];
+  return `<span class="chip ${st}">${icon}${label}</span>`;
+}
+// Doctor details carry their fix commands in backticks: render each one as a
+// code chip with its own Copy button.
+function detailHtml(detail) {
+  return String(detail || '').split('`').map((part, i) => (i % 2 && part.trim())
+    ? `<span class="cmd"><code>${esc(part)}</code>${copyBtn(part, {title: 'Copy command'})}</span>`
+    : esc(part)).join('');
+}
+async function wizStep1() {
+  const req = ++wiz.docReq;
+  const list = $('#wiz-checks'), sum = $('#wiz-summary'), btn = $('#wiz-recheck');
+  btn.disabled = true;
+  sum.className = 'wiz-summary';
+  sum.innerHTML = '<span class="spinner"></span>Checking your setup&hellip;';
+  if (!list.children.length)
+    list.innerHTML = [62, 48, 74, 55].map(w =>
+      `<li class="check-row"><span class="skel" style="width:58px"></span>` +
+      `<span class="skel" style="width:${w}%"></span><span class="skel" style="width:${w + 20}%"></span></li>`).join('');
+  let res;
+  try { res = await api('/api/doctor'); }
+  catch (e) {
+    res = {rows: [{status: 'FAIL', label: 'setup check',
+                   detail: 'could not reach omnihear — is it still running?'}]};
+  }
+  if (req !== wiz.docReq) return;  // a newer Re-check owns the screen
+  btn.disabled = false;
+  const rank = {FAIL: 0, warn: 1};
+  const rows = (Array.isArray(res.rows) ? res.rows : [])
+    .map((r, i) => [r, i])
+    .sort((a, b) => ((rank[a[0].status] ?? 2) - (rank[b[0].status] ?? 2)) || a[1] - b[1])
+    .map(x => x[0]);
+  const fails = rows.filter(r => r.status === 'FAIL').length;
+  const warns = rows.filter(r => r.status === 'warn').length;
+  wiz.doctorOk = !fails;
+  wizRenderProgress();
+  list.innerHTML = rows.map(r => {
+    const st = r.status === 'FAIL' ? 'fail' : r.status === 'warn' ? 'warn' : 'ok';
+    return `<li class="check-row ${st}">${chipHtml(st)}<span class="check-label">${esc(r.label)}</span>` +
+      `<span class="check-detail">${detailHtml(r.detail)}</span></li>`;
+  }).join('');
+  const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+  sum.className = 'wiz-summary ' + (fails ? 'fail' : warns ? 'warn' : 'ok');
+  sum.innerHTML = fails
+    ? `${ICON.fail}<span>${plural(fails, 'thing')} to fix <span class="sum-sub">&middot; run the fixes below, then Re-check</span></span>`
+    : warns
+      ? `${ICON.check}<span>All good <span class="sum-sub">&middot; ${plural(warns, 'optional suggestion')}</span></span>`
+      : `${ICON.check}<span>All good <span class="sum-sub">&middot; omnihear has everything it needs</span></span>`;
+}
+
+// Step 2: live hotkey + microphone test
+function wizStep2() {
+  wiz.fast = true;  // the wizard polls status itself while this step is open
+  wiz.meter = 0;
+  wiz.lastTick = 0;
+  wizUpdate2(Object.assign({}, lastStatus || {}, {recording: false, locked: false, level: 0}));
+  wiz.helpTimer = setTimeout(() => { if (!wiz.sawRec) $('#wiz-help').hidden = false; }, 15000);
+  wizLoop(120, async gen => {
+    const s = await api('/api/status');
+    if (gen !== wiz.gen) return;
+    renderStatus(s);
+    wizUpdate2(s);
+  });
+}
+function wizUpdate2(s) {
+  wizDrawKeys(s);
+  const now = performance.now();
+  const rec = !!s.recording, locked = !!s.locked, hf = !!s.hands_free;
+  const lvl = Math.max(0, Math.min(1, Number(s.level) || 0));
+  if (rec) {
+    wiz.sawRec = true;
+    if (lvl > LEVEL_OK) wiz.sawVoice = true;
+    else if (!wiz.sawVoice && wiz.lastTick) wiz.quietMs += now - wiz.lastTick;
+  }
+  if (locked) wiz.sawLock = true;
+  wiz.lastTick = rec ? now : 0;
+  // Fast attack, slower release, so short syllables stay visible.
+  wiz.meter = rec ? Math.max(lvl, wiz.meter * 0.72) : 0;
+  const lit = Math.round(wiz.meter * METER_SEGS);
+  const meter = $('#wiz-meter');
+  meter.querySelectorAll('i').forEach((el, i) => el.classList.toggle('on', i < lit));
+  meter.setAttribute('aria-valuenow', String(Math.round(wiz.meter * 100)));
+  $('#wiz-level-txt').textContent = rec ? Math.round(lvl * 100) + '%' : '–';
+  $('#wiz-keys').classList.toggle('pressed', rec && !locked);
+  const orb = $('#wiz-orb');
+  orb.classList.toggle('on', rec);
+  orb.classList.toggle('locked', locked);
+  $('#wiz-handsfree').hidden = !hf;
+  $('#wiz-c-lock').hidden = !hf;
+  $('#wiz-c-hotkey').classList.toggle('done', wiz.sawRec);
+  $('#wiz-c-mic').classList.toggle('done', wiz.sawVoice);
+  $('#wiz-c-lock').classList.toggle('done', wiz.sawLock);
+  const txt = $('#wiz-orb-text');
+  txt.classList.toggle('rec', rec);
+  const msg = locked ? 'Locked — recording hands-free. Tap your hotkey once to stop.'
+    : rec ? (lvl > LEVEL_OK ? 'Listening… we can hear you.' : 'Listening… say something.')
+    : (wiz.sawRec && wiz.sawVoice) ? 'Your hotkey and microphone work. On to the next step!'
+    : wiz.sawRec ? 'We saw your hotkey but heard nothing. Hold it again and speak up.'
+    : hf ? 'Hold your hotkey (or double-tap it to lock) and say something…'
+    : 'Hold your hotkey and say something…';
+  if (txt.textContent !== msg) txt.textContent = msg;  // aria-live: announce changes only
+  if (wiz.sawRec) $('#wiz-help').hidden = true;
+  $('#wiz-mic-help').hidden = !(wiz.sawRec && !wiz.sawVoice && wiz.quietMs > 2500);
+  $('#wiz-next').classList.toggle('pulse', wiz.step === 2 && wiz.sawRec && wiz.sawVoice);
+  wizRenderProgress();
+}
+
+// Step 3: dictate into a practice box; success = text arrives in the box or
+// a new history row appears (newest id beyond the one seen on entry).
+function wizState3(cls, html) {
+  const el = $('#wiz3-state');
+  el.className = 'practice-state' + (cls ? ' ' + cls : '');
+  setHTML(el, html);  // unchanged markup keeps its spinner spinning
+}
+async function wizStep3() {
+  const gen = wiz.gen;
+  const ta = $('#wiz-practice');
+  if (lastStatus) wizDrawKeys(lastStatus);
+  ta.classList.remove('rec');
+  ta.focus({preventScroll: true});
+  if (wiz.done3) { wizPaint3Done(); return; }
+  wiz.rec3 = false;
+  wiz.stoppedAt = 0;
+  wizState3('', 'Waiting for you to dictate&hellip;');
+  try {
+    const rows = await api('/api/history?limit=1');
+    if (gen !== wiz.gen) return;
+    wiz.baseId = rows.length ? rows[0].id : 0;
+  } catch (e) {
+    if (gen !== wiz.gen) return;
+    wiz.baseId = 0;
+  }
+  if (wiz.done3) return;  // text was typed while we fetched the baseline
+  wiz.fast = true;
+  let n = 0;
+  wizLoop(250, async g => {
+    const s = await api('/api/status');
+    if (g !== wiz.gen) return;
+    renderStatus(s);
+    wizUpdate3(s);
+    if (++n % 3 === 0 && !wiz.done3) {
+      const rows = await api('/api/history?limit=1');
+      if (g !== wiz.gen) return;
+      if (rows.length && rows[0].id > wiz.baseId) wizSuccess3(rows[0]);
+    }
+  });
+}
+function wizUpdate3(s) {
+  if (wiz.done3) return;
+  const ta = $('#wiz-practice');
+  const rec = !!s.recording;
+  ta.classList.toggle('rec', rec);
+  if (rec) {
+    wiz.rec3 = true;
+    wiz.stoppedAt = 0;
+    // omnihear types into whatever has focus: make that the practice box.
+    if (document.activeElement !== ta) ta.focus({preventScroll: true});
+    wizState3('rec', `<span class="dot"></span>${s.locked ? 'Locked — tap your hotkey to stop' : 'Listening… let go when you’re done'}`);
+  } else if (wiz.rec3) {
+    if (!wiz.stoppedAt) wiz.stoppedAt = Date.now();
+    const waited = Date.now() - wiz.stoppedAt;
+    if (waited < 90000 && !s.model_loaded)
+      wizState3('busy', '<span class="spinner"></span>Loading the speech model&hellip; the first time can take a minute.');
+    else if (waited < 12000)
+      wizState3('busy', '<span class="spinner"></span>Transcribing&hellip;');
+    else
+      wizState3('warn', 'Nothing came through. Hold the hotkey a little longer and speak clearly, ' +
+        'or check <a class="inline-link" href="#/welcome?step=2">Step 2</a>.');
+  } else {
+    wizState3('', 'Waiting for you to dictate&hellip;');
+  }
+}
+function wizSuccess3(row) {
+  if (wiz.done3) return;
+  wiz.done3 = true;
+  wizStop();  // done polling; the 1 s status poll takes over
+  const ta = $('#wiz-practice');
+  ta.classList.remove('rec');
+  const heard = row ? (row.corrected_text || row.text || '') : '';
+  $('#wiz3-heard').textContent = heard ? `omnihear heard: “${heard}”` : '';
+  wizPaint3Done();
+  confetti($('#wiz3-success'));
+  // Typing happens before the history insert, so an empty box by now means
+  // the text went somewhere else.
+  if (row && !ta.value.trim())
+    wiz.helpTimer = setTimeout(() => {
+      if (ta.value.trim()) return;
+      // Transcription works but insertion didn't reach the box: don't claim
+      // full success next to the "didn't land" hint.
+      $('#wiz3-title').textContent = WIZ3_TITLE_PARTIAL;
+      $('#wiz3-nottyped').hidden = false;
+    }, 2000);
+}
+const WIZ3_TITLE_OK = 'It works — you’re ready to dictate!';
+const WIZ3_TITLE_PARTIAL = 'Almost there: omnihear heard you';
+function wizPaint3Done() {
+  wizState3('ok', `${ICON.check}Dictation works!`);
+  $('#wiz3-success').hidden = false;
+  $('#wiz-next').classList.add('pulse');
+  wizRenderProgress();
+}
+function confetti(host) {
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const colors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'];
+  const box = document.createElement('div');
+  box.className = 'confetti';
+  box.setAttribute('aria-hidden', 'true');
+  for (let i = 0; i < 28; i++) {
+    const p = document.createElement('i');
+    const a = (i / 28) * Math.PI * 2 + Math.random() * 0.4;
+    const d = 45 + Math.random() * 85;
+    p.style.setProperty('--x', (Math.cos(a) * d).toFixed(1) + 'px');
+    p.style.setProperty('--y', (Math.sin(a) * d * 0.75 + 28).toFixed(1) + 'px');
+    p.style.setProperty('--r', Math.round(Math.random() * 720 - 360) + 'deg');
+    p.style.background = colors[i % colors.length];
+    p.style.animationDelay = Math.round(Math.random() * 90) + 'ms';
+    box.appendChild(p);
+  }
+  host.appendChild(box);
+  setTimeout(() => box.remove(), 1500);
+}
+
+$('#wiz-back').addEventListener('click', () => wizGo(Math.max(1, wiz.step - 1)));
+$('#wiz-next').addEventListener('click', () => wiz.step >= 3 ? wizFinish() : wizGo(wiz.step + 1));
+$('#wiz-skip').addEventListener('click', wizFinish);
+$('#wiz-recheck').addEventListener('click', wizStep1);
+$('#wiz-practice').addEventListener('input', () => {
+  const has = !!$('#wiz-practice').value.trim();
+  if (has) { $('#wiz3-nottyped').hidden = true; $('#wiz3-title').textContent = WIZ3_TITLE_OK; }
+  if (has && wiz.step === 3 && !wiz.done3) wizSuccess3(null);
+});
+$('#wiz3-again').addEventListener('click', () => {
+  wiz.done3 = false;
+  $('#wiz-practice').value = '';
+  $('#wiz3-heard').textContent = '';
+  $('#wiz3-success').hidden = true;
+  $('#wiz3-nottyped').hidden = true;
+  $('#wiz3-title').textContent = WIZ3_TITLE_OK;
+  wizShow(3);
+});
+// Step 2 has nothing to type into, but omnihear still "types" the transcript
+// into this window. Swallow plain printable keys aimed at the page itself so
+// a space can't scroll and a ' or / can't open Firefox's quick-find bar.
+// Shortcuts, Tab, and keys aimed at controls pass through.
+document.addEventListener('keydown', e => {
+  if (capture || wiz.step !== 2 || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.target !== document.body && e.target !== $('#wiz-step-2')) return;
+  if (e.key.length === 1 || e.key === 'Enter') e.preventDefault();
+});
+document.querySelectorAll('[data-os]').forEach(el => { el.hidden = el.dataset.os !== PLATFORM; });
+
 // --- Startup & Polling ---
+// First visit with no history yet: open the setup wizard instead of an empty
+// dashboard (once the user finishes or skips, the flag keeps it closed).
+async function boot() {
+  const h = getHash();
+  if (!lsGet(ONBOARD_KEY) && (h === '#/' || h === '#')) {
+    try {
+      const rows = await api('/api/history?limit=1');
+      if (Array.isArray(rows) && !rows.length && getHash() === h)
+        history.replaceState(null, '', '#/welcome');
+    } catch (e) {}
+  }
+  route();
+}
+window.addEventListener('hashchange', route);
 loadStatus();
 loadConfig();
-// route() already called above and loaded the initial screen
+boot();
 
-setInterval(loadStatus, 1000);
+setInterval(() => { if (!wiz.fast) loadStatus(); }, 1000);
 setInterval(() => { if (!isRecording) refreshCurrentScreen(); }, 8000);
 </script>
 </body>
@@ -1464,8 +2488,25 @@ def _auth_error(e: Exception) -> str:
     return str(e) or "network error"
 
 
+def _doctor_report(cfg: dict | None) -> dict:
+    """`omnihear --doctor` rows for the setup wizard (read-only).
+
+    Checks the running process's effective config when there is one. Never
+    raises: a crashing check becomes a FAIL row instead of an HTTP 500, so
+    the page can still say something useful.
+    """
+    try:
+        from . import doctor
+        rows = [{"status": status, "label": label, "detail": detail}
+                for status, label, detail in doctor.checks(cfg or config_mod.load_config())]
+    except Exception as e:
+        rows = [{"status": "FAIL", "label": "setup check",
+                 "detail": f"could not run the setup checks: {e}"}]
+    return {"rows": rows, "ok": not any(r["status"] == "FAIL" for r in rows)}
+
+
 class DashboardHandler(BaseHTTPRequestHandler):
-    # set on the server: server.db, server.effective_config, server.status_fn
+    # set on the server: server.db, server.status_fn, server.brain, server.cfg
 
     def log_message(self, *args):
         pass
@@ -1501,11 +2542,13 @@ class DashboardHandler(BaseHTTPRequestHandler):
                              json.dumps(config_mod.MODEL_NAMES))
                     .replace("__LANGS__",
                              json.dumps(config_mod.LANGUAGE_NAMES))
+                    .replace("__CLEANUP_LEVELS__",
+                             json.dumps(list(config_mod.CLEANUP_LEVELS)))
+                    .replace("__PLATFORM__", json.dumps(sys.platform))
                     .replace("__TYPE_METHODS__",
-                             json.dumps(["auto", "pynput"]
+                             json.dumps(["auto", "pynput", "paste"]
                                         if sys.platform in ("win32", "darwin")
-                                        else ["auto", "pynput", "xdotool",
-                                              "ydotool", "wtype"])))
+                                        else list(config_mod.TYPE_METHODS))))
             self._send(200, page.encode(), "text/html; charset=utf-8")
         elif url.path == "/api/history":
             if db is None:
@@ -1544,6 +2587,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
         elif url.path == "/api/auth/status":
             from . import cloud
             self._send(200, cloud.status())
+        elif url.path == "/api/doctor":
+            self._send(200, _doctor_report(getattr(self.server, "cfg", None)))
         elif url.path == "/api/status":
             st = dict(self.server.status_fn())
             if sys.platform == "darwin":
@@ -1692,9 +2737,11 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._send(404, {"error": "not found"})
 
 
-def start_dashboard(db, status_fn, port: int = 4738, brain=None):
+def start_dashboard(db, status_fn, port: int = 4738, brain=None, cfg=None):
     """Start the dashboard server on 127.0.0.1 in a daemon thread.
 
+    cfg is the running process's effective config (CLI flags applied), for
+    endpoints that report on the live setup; None falls back to the file.
     Returns the server, or None if the port could not be bound.
     """
     try:
@@ -1706,6 +2753,7 @@ def start_dashboard(db, status_fn, port: int = 4738, brain=None):
     server.db = db
     server.status_fn = status_fn
     server.brain = brain
+    server.cfg = cfg
     threading.Thread(target=server.serve_forever, daemon=True).start()
     print(f"omnihear: dashboard at http://127.0.0.1:{port}")
     return server

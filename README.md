@@ -24,12 +24,21 @@ sudo apt install omnihear
 omnihear                                   # defaults: base.en model, right-Ctrl hotkey
 omnihear --model small.en --hotkey f9      # custom model + hotkey
 omnihear --list-devices                    # list microphones
+omnihear --doctor                          # check permissions/deps, print fixes
 omnihear --help                            # full CLI options
 ```
+
+While you hold the hotkey, a small pill at the bottom of the screen shows a
+red dot and a waveform that follows your voice. It switches to an amber
+spinner while transcribing, and turns grey if the microphone sends no
+signal.
 
 The terminal stays quiet during normal use (transcriptions are visible in
 the web dashboard); pass `--verbose` (or set `verbose = true`) to print
 per-transcription output for debugging.
+
+What's coming next: [FEATURES.md](FEATURES.md) (checklist) and
+[ROADMAP.md](ROADMAP.md) (plan and rollout).
 
 ## Web dashboard
 
@@ -55,9 +64,27 @@ omnihear --write-config
 
 Keys mirror the CLI flags (`model`, `hotkey`, `device`, `compute_type`,
 `language`, `beam_size`, `min_duration`, `input_device`, `type_method`,
-`sample_rate`) plus `dashboard`, `dashboard_port`, `notify`, `beep`,
+`sample_rate`, `hands_free`, `max_recording_seconds`, `paste_last_hotkey`,
+`cleanup`) plus `dashboard`, `dashboard_port`, `notify`, `beep`,
 `history`, and `idle_unload_minutes`. `type_method` defaults to `auto`
-(pynput on X11/Windows/macOS; ydotool or wtype on Wayland).
+(pynput on X11/Windows/macOS; the built-in uinput typer on Wayland).
+
+## Dictation features (beta)
+
+All off by default. Turn them on in the dashboard (Settings → Dictation) or
+in `config.toml`, then restart omnihear.
+
+| Setting | What it does |
+|---|---|
+| `hands_free = true` | Double-tap the hotkey to keep recording without holding it; tap once more to stop. A single quick tap is ignored. |
+| `max_recording_seconds = 300` | Safety cap for any recording (10–3600 s); stops and transcribes at the limit. Always on. |
+| `type_method = "paste"` | Inserts through the clipboard (Shift+Insert on Linux, Ctrl+V on Windows, Cmd+V on macOS) and restores what you had copied. Instant for long text, works with any keyboard layout. Linux needs `xclip` (X11, GNOME) or `wl-clipboard` (KDE, wlroots); the `.deb` recommends both. |
+| `cleanup = "light"` | Removes "um/uh", stutters ("the the") and spoken corrections ("at 2, actually 3" → "at 3") before typing. English only, and cautious on purpose. |
+| `paste_last_hotkey = "f8"` | Puts your last transcript at the cursor again, for when it went to the wrong window. Can't be your system paste shortcut. |
+
+The dashboard also has a **Setup** tab, a first-run wizard that checks your
+setup, tests the hotkey and microphone live, and confirms a practice
+dictation lands. Every transcript in the dashboard has a **Copy** button.
 
 ## Running as a service
 
@@ -163,29 +190,47 @@ in hotkeys (e.g. `cmd_r`). Config lives at
 
 ## Wayland (Linux)
 
-Wayland cannot use X11 global grabs or `xdotool`, so omnihear switches
-backends automatically when `XDG_SESSION_TYPE=wayland`:
+Ubuntu 24.04+ (and every GNOME release since GNOME 49, which removed the
+X11 session) defaults to Wayland. Wayland has no X11 global grabs or
+`xdotool`, so omnihear switches backends automatically when
+`XDG_SESSION_TYPE=wayland`:
 
-1. **Hotkeys** — reads `/dev/input/event*` directly. Your user must be in
-   the `input` group:
+1. **Hotkeys** — reads `/dev/input/event*` directly (keyboards plugged in
+   or paired later are picked up automatically). Your user must be in the
+   `input` group — the one manual step:
 
    ```bash
    sudo usermod -aG input $USER
    # then log out and back in
    ```
 
-2. **Text injection** — install one of:
+2. **Typing** — built in. omnihear creates its own virtual keyboard on
+   `/dev/uinput`, which works on GNOME, KDE and wlroots compositors with no
+   daemon. The `.deb` installs a udev rule
+   (`/usr/lib/udev/rules.d/70-omnihear-uinput.rules`) that gives the
+   logged-in desktop user access — the same `uaccess` rule Steam uses for
+   controllers. Accented characters and emoji are entered with IBus's
+   `Ctrl+Shift+U` (GNOME's default input method).
 
-   ```bash
-   sudo apt install ydotool          # any compositor (GNOME/KDE/wlroots)
-   systemctl --user enable --now ydotoold
+Check everything with:
 
-   # or, on wlroots compositors (sway, hyprland, …):
-   sudo apt install wtype
-   ```
+```bash
+omnihear --doctor
+```
 
-`type_method = "auto"` (the default) picks `ydotool` or `wtype` when
-present. Force one with `--type-method ydotool` / `wtype`.
+`type_method = "auto"` (the default) picks `uinput`, then `ydotool`, then
+`wtype` (wlroots only — GNOME and KDE don't support it). Force one with
+`--type-method uinput|ydotool|wtype`. Running from source, install the udev
+rule yourself:
+
+```bash
+sudo cp udev/70-omnihear-uinput.rules /usr/lib/udev/rules.d/
+sudo modprobe uinput && sudo udevadm control --reload-rules && sudo udevadm trigger --sysname-match=uinput
+```
+
+Known limits: typing assumes a US QWERTY layout (other layouts can get some
+symbols wrong; `type_method = "paste"`, beta, avoids this), and
+`terminal_commands` stays X11-only.
 
 ## Requirements
 

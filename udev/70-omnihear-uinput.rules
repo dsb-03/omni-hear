@@ -1,0 +1,6 @@
+# omnihear: let the logged-in desktop user create a virtual keyboard on
+# /dev/uinput, which omnihear uses to type dictated text on Wayland (GNOME,
+# KDE, wlroots) without a root daemon. `uaccess` grants access only to the
+# user of the active local seat — the same rule Steam ships for controllers.
+# Must sort before 73-seat-late.rules, which applies the uaccess tag.
+KERNEL=="uinput", SUBSYSTEM=="misc", OPTIONS+="static_node=uinput", TAG+="uaccess"

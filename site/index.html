@@ -1,0 +1,612 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>omnihear — local push-to-talk dictation</title>
+<meta name="description" content="Hold a key, speak, release. omnihear transcribes your voice with Whisper on your own machine and types it into any app. No cloud, no account. Linux (X11 + Wayland), Windows, macOS.">
+<meta property="og:title" content="omnihear — local push-to-talk dictation">
+<meta property="og:description" content="Hold a key, speak, release. Whisper runs on your machine and types into any app. No cloud.">
+<meta property="og:type" content="website">
+<meta name="theme-color" content="#3d84f5">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect x='4' y='4' width='56' height='56' rx='15' fill='%233d84f5'/%3E%3Ccircle cx='32' cy='27' r='8.5' fill='white'/%3E%3Cpath d='M18 31a14.5 14.5 0 0 0 28 0' fill='none' stroke='white' stroke-width='2.4'/%3E%3Cpath d='M32 43v4M26 47.5h12' stroke='white' stroke-width='2.4'/%3E%3C/svg%3E">
+<style>
+:root {
+  --bg: #fbfbfd;
+  --bg-alt: #f2f4f8;
+  --card: #ffffff;
+  --text: #0e1220;
+  --muted: #5a6275;
+  --line: #e3e6ee;
+  --brand: #3d84f5;
+  --brand-ink: #1f5fd1;
+  --brand-soft: #e7f0ff;
+  --rec: #ff4b3e;
+  --busy: #ffab1a;
+  --code-bg: #0f1422;
+  --code-text: #e6e9f2;
+  --shadow: 0 1px 2px rgba(14,18,32,.04), 0 12px 32px -12px rgba(14,18,32,.14);
+  --radius: 16px;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0b0e16; --bg-alt: #10141f; --card: #141927; --text: #eef1f8;
+    --muted: #9aa3b8; --line: #232a3b; --brand: #5b9bff; --brand-ink: #8ab8ff;
+    --brand-soft: #16233d; --code-bg: #070a12; --code-text: #e6e9f2;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 12px 32px -12px rgba(0,0,0,.6);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0b0e16; --bg-alt: #10141f; --card: #141927; --text: #eef1f8;
+  --muted: #9aa3b8; --line: #232a3b; --brand: #5b9bff; --brand-ink: #8ab8ff;
+  --brand-soft: #16233d; --code-bg: #070a12; --code-text: #e6e9f2;
+  --shadow: 0 1px 2px rgba(0,0,0,.3), 0 12px 32px -12px rgba(0,0,0,.6);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0; background: var(--bg); color: var(--text);
+  font: 16px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, Cantarell, "Noto Sans", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--brand-ink); text-decoration: none; }
+a:hover { text-decoration: underline; }
+code, pre, kbd { font-family: ui-monospace, "SF Mono", "JetBrains Mono", "Ubuntu Mono", Menlo, Consolas, monospace; }
+.wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+@media (max-width: 600px) { .wrap { padding: 0 16px; } }
+
+/* nav */
+header.nav {
+  position: sticky; top: 0; z-index: 10;
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  backdrop-filter: saturate(1.4) blur(12px); -webkit-backdrop-filter: saturate(1.4) blur(12px);
+  border-bottom: 1px solid var(--line);
+}
+.nav .wrap { display: flex; align-items: center; gap: 24px; height: 60px; }
+.logo { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 18px; color: var(--text); letter-spacing: -.01em; }
+.logo:hover { text-decoration: none; }
+.logo svg { width: 28px; height: 28px; }
+.nav nav { display: flex; gap: 22px; margin-left: auto; align-items: center; }
+.nav nav a { color: var(--muted); font-size: 15px; }
+.nav nav a:hover { color: var(--text); text-decoration: none; }
+.theme-btn { background: none; border: 1px solid var(--line); color: var(--muted); border-radius: 8px; width: 34px; height: 34px; cursor: pointer; display: grid; place-items: center; }
+.theme-btn:hover { color: var(--text); }
+@media (max-width: 720px) { .nav nav a.hide-sm { display: none; } }
+
+/* buttons */
+.btn { display: inline-flex; align-items: center; gap: 8px; padding: 12px 20px; border-radius: 12px; font-weight: 600; font-size: 15px; border: 1px solid transparent; cursor: pointer; }
+.btn:hover { text-decoration: none; }
+.btn-primary { background: var(--brand); color: #fff; box-shadow: 0 6px 20px -8px var(--brand); }
+.btn-primary:hover { filter: brightness(1.06); }
+.btn-ghost { border-color: var(--line); color: var(--text); background: var(--card); }
+.btn-ghost:hover { border-color: var(--muted); }
+
+/* hero */
+.hero { padding: 88px 0 72px; position: relative; overflow: hidden; }
+.hero::before {
+  content: ""; position: absolute; inset: -40% -10% auto -10%; height: 680px; z-index: -1;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--brand) 22%, transparent), transparent);
+  opacity: .7;
+}
+.hero-grid { display: grid; grid-template-columns: 1.05fr 1fr; gap: 56px; align-items: center; }
+@media (max-width: 900px) { .hero-grid { grid-template-columns: 1fr; gap: 40px; } .hero { padding: 56px 0 48px; } }
+.eyebrow { display: inline-flex; gap: 8px; align-items: center; font-size: 13px; font-weight: 600; color: var(--brand-ink); background: var(--brand-soft); padding: 6px 12px; border-radius: 999px; }
+.eyebrow .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--brand); }
+h1 { font-size: clamp(40px, 6vw, 64px); line-height: 1.04; letter-spacing: -.035em; margin: 20px 0 18px; }
+h1 .accent { color: var(--brand); }
+.lede { font-size: clamp(17px, 2vw, 20px); color: var(--muted); max-width: 34em; margin: 0 0 30px; }
+.cta { display: flex; gap: 12px; flex-wrap: wrap; }
+.platforms { margin-top: 22px; font-size: 14px; color: var(--muted); display: flex; gap: 14px; flex-wrap: wrap; }
+.platforms span::before { content: "\2713"; color: var(--brand); margin-right: 6px; font-weight: 700; }
+
+/* demo */
+.demo { background: var(--card); border: 1px solid var(--line); border-radius: 20px; box-shadow: var(--shadow); overflow: hidden; }
+.demo-bar { display: flex; align-items: center; gap: 7px; padding: 12px 14px; border-bottom: 1px solid var(--line); background: var(--bg-alt); }
+.demo-bar i { width: 11px; height: 11px; border-radius: 50%; background: var(--line); display: block; }
+.demo-bar .title { margin-left: 10px; font-size: 13px; color: var(--muted); }
+.demo-body { padding: 22px 22px 18px; }
+.demo-field { min-height: 132px; border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; font-size: 16px; line-height: 1.55; background: var(--bg); }
+.demo-field .who { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+.caret { display: inline-block; width: 2px; height: 1.15em; background: var(--brand); vertical-align: text-bottom; margin-left: 1px; animation: blink 1s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+.demo-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 16px; gap: 12px; }
+.keycap { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+kbd { font-size: 12px; padding: 5px 9px; border-radius: 7px; border: 1px solid var(--line); border-bottom-width: 3px; background: var(--card); color: var(--text); transition: transform .08s, border-bottom-width .08s, background .2s; }
+kbd.down { transform: translateY(2px); border-bottom-width: 1px; background: var(--brand-soft); border-color: var(--brand); }
+.pill { width: 126px; height: 38px; display: block; opacity: 0; transform: translateY(6px) scale(.96); transition: opacity .18s, transform .18s; filter: drop-shadow(0 6px 14px rgba(0,0,0,.28)); }
+.pill.on { opacity: 1; transform: none; }
+.state { margin-left: 10px; font-size: 13px; color: var(--muted); min-width: 7.5em; }
+
+/* sections */
+section { padding: 84px 0; }
+section.alt { background: var(--bg-alt); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.sec-head { max-width: 640px; margin-bottom: 44px; }
+.sec-head h2 { font-size: clamp(28px, 3.6vw, 40px); letter-spacing: -.025em; line-height: 1.12; margin: 10px 0 12px; }
+.sec-head p { color: var(--muted); font-size: 18px; margin: 0; }
+.kicker { font-size: 13px; font-weight: 700; color: var(--brand-ink); text-transform: uppercase; letter-spacing: .08em; }
+@media (max-width: 600px) { section { padding: 60px 0; } }
+
+/* stats strip */
+.stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+.stat { background: var(--card); padding: 24px 22px; }
+.stat strong { display: block; font-size: 30px; letter-spacing: -.02em; }
+.stat span { color: var(--muted); font-size: 14px; }
+@media (max-width: 760px) { .stats { grid-template-columns: repeat(2, 1fr); } }
+
+/* steps */
+.steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; counter-reset: step; }
+.step { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 26px; position: relative; }
+.step::before { counter-increment: step; content: counter(step); display: grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; background: var(--brand-soft); color: var(--brand-ink); font-weight: 700; margin-bottom: 16px; }
+.step h3 { margin: 0 0 6px; font-size: 19px; }
+.step p { margin: 0; color: var(--muted); }
+code { overflow-wrap: anywhere; }
+.code pre, .code code { overflow-wrap: normal; }
+@media (max-width: 820px) { .steps { grid-template-columns: 1fr; } }
+
+/* features */
+.features { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+.feature { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 24px; }
+.feature .ic { width: 40px; height: 40px; border-radius: 11px; background: var(--brand-soft); color: var(--brand-ink); display: grid; place-items: center; margin-bottom: 14px; }
+.feature .ic svg { width: 22px; height: 22px; }
+.feature h3 { margin: 0 0 6px; font-size: 17px; display: flex; gap: 8px; align-items: center; }
+.feature p { margin: 0; color: var(--muted); font-size: 15px; }
+.tag { font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--busy); border: 1px solid currentColor; border-radius: 6px; padding: 1px 6px; }
+@media (max-width: 900px) { .features { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 600px) { .features { grid-template-columns: 1fr; } }
+
+/* compare */
+.compare { width: 100%; border-collapse: separate; border-spacing: 0; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; font-size: 15px; }
+.compare th, .compare td { padding: 14px 18px; text-align: left; border-bottom: 1px solid var(--line); }
+.compare tr:last-child td { border-bottom: 0; }
+.compare thead th { font-size: 13px; color: var(--muted); font-weight: 600; background: var(--bg-alt); }
+.compare td:nth-child(2) { color: var(--text); font-weight: 600; }
+.compare td:nth-child(3) { color: var(--muted); }
+.yes { color: var(--brand-ink); }
+.table-scroll { overflow-x: auto; }
+
+/* install */
+.tabs { display: inline-flex; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 4px; gap: 4px; margin-bottom: 18px; flex-wrap: wrap; }
+.tabs button { border: 0; background: none; color: var(--muted); font: inherit; font-weight: 600; font-size: 14px; padding: 8px 16px; border-radius: 9px; cursor: pointer; }
+.tabs button[aria-selected="true"] { background: var(--brand); color: #fff; }
+.panel { display: none; }
+.panel.on { display: block; }
+.panel p { color: var(--muted); max-width: 46em; }
+.code { position: relative; background: var(--code-bg); color: var(--code-text); border-radius: 14px; padding: 18px 20px; margin: 14px 0; overflow-x: auto; }
+.code pre { margin: 0; font-size: 14px; line-height: 1.7; white-space: pre; }
+.code .c { color: #7d879c; }
+.copy { position: absolute; top: 10px; right: 10px; background: rgba(255,255,255,.08); color: #d8dce7; border: 1px solid rgba(255,255,255,.14); border-radius: 8px; font-size: 12px; padding: 5px 10px; cursor: pointer; }
+.copy:hover { background: rgba(255,255,255,.16); }
+.note { display: block; background: var(--brand-soft); border-radius: 12px; padding: 14px 16px; font-size: 15px; color: var(--text); max-width: 760px; }
+.note b { color: var(--brand-ink); }
+
+/* faq */
+.faq { max-width: 780px; }
+details { border-bottom: 1px solid var(--line); padding: 18px 0; }
+details summary { cursor: pointer; font-weight: 600; font-size: 17px; list-style: none; display: flex; justify-content: space-between; gap: 16px; }
+details summary::-webkit-details-marker { display: none; }
+details summary::after { content: "+"; color: var(--muted); font-weight: 400; font-size: 22px; line-height: 1; }
+details[open] summary::after { content: "\2212"; }
+details p { color: var(--muted); margin: 10px 0 0; }
+
+/* final cta */
+.final { text-align: center; }
+.final h2 { font-size: clamp(30px, 4vw, 44px); letter-spacing: -.03em; margin: 0 0 14px; }
+.final p { color: var(--muted); font-size: 18px; margin: 0 0 28px; }
+.final .cta { justify-content: center; }
+
+footer { border-top: 1px solid var(--line); padding: 32px 0 48px; color: var(--muted); font-size: 14px; }
+footer .wrap { display: flex; gap: 20px; flex-wrap: wrap; justify-content: space-between; align-items: center; }
+footer nav { display: flex; gap: 18px; flex-wrap: wrap; }
+footer a { color: var(--muted); }
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .caret { animation: none; }
+}
+</style>
+</head>
+<body>
+
+<header class="nav">
+  <div class="wrap">
+    <a class="logo" href="#top" aria-label="omnihear home">
+      <svg viewBox="0 0 64 64" aria-hidden="true"><rect x="4" y="4" width="56" height="56" rx="15" fill="#3d84f5"/><circle cx="32" cy="27" r="8.5" fill="#fff"/><path d="M18 31a14.5 14.5 0 0 0 28 0" fill="none" stroke="#fff" stroke-width="2.4"/><path d="M32 43v4M26 47.5h12" stroke="#fff" stroke-width="2.4"/></svg>
+      omnihear
+    </a>
+    <nav>
+      <a class="hide-sm" href="#how">How it works</a>
+      <a class="hide-sm" href="#features">Features</a>
+      <a class="hide-sm" href="#faq">FAQ</a>
+      <a href="https://github.com/dsb-03/omni-hear">GitHub</a>
+      <button class="theme-btn" id="theme" type="button" aria-label="Toggle dark mode">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+      </button>
+    </nav>
+  </div>
+</header>
+
+<main id="top">
+  <div class="hero">
+    <div class="wrap hero-grid">
+      <div>
+        <span class="eyebrow"><span class="dot"></span>Now on Ubuntu Wayland, no extra tools</span>
+        <h1>Talk. It types.<br><span class="accent">Nothing leaves your machine.</span></h1>
+        <p class="lede">Hold a key, speak, let go. omnihear runs Whisper on your computer and types the words into whatever app you're using: editor, browser, chat, terminal.</p>
+        <div class="cta">
+          <a class="btn btn-primary" href="#install">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="M12 3v12m0 0l-5-5m5 5l5-5M5 21h14"/></svg>
+            Install omnihear
+          </a>
+          <a class="btn btn-ghost" href="https://github.com/dsb-03/omni-hear">View source</a>
+        </div>
+        <div class="platforms"><span>Linux (X11 + Wayland)</span><span>Windows</span><span>macOS (Apple Silicon)</span></div>
+      </div>
+
+      <div class="demo" aria-label="Animated demo: holding Right Ctrl, speaking, and text appearing in a message field">
+        <div class="demo-bar"><i></i><i></i><i></i><span class="title">Any text field</span></div>
+        <div class="demo-body">
+          <div class="demo-field">
+            <div class="who">Message to #design</div>
+            <span id="typed"></span><span class="caret"></span>
+          </div>
+          <div class="demo-foot">
+            <span class="keycap">Hold <kbd id="key">Right Ctrl</kbd><span class="state" id="state" aria-live="polite"></span></span>
+            <canvas class="pill" id="pill" width="126" height="38" aria-hidden="true"></canvas>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <div class="stats">
+      <div class="stat"><strong>0 bytes</strong><span>of audio sent anywhere</span></div>
+      <div class="stat"><strong>100</strong><span>languages, or auto-detect</span></div>
+      <div class="stat"><strong>Any app</strong><span>types where your cursor is</span></div>
+      <div class="stat"><strong>Tens of MB</strong><span>RAM while idle; the model unloads itself</span></div>
+    </div>
+  </div>
+
+  <section id="how">
+    <div class="wrap">
+      <div class="sec-head">
+        <div class="kicker">How it works</div>
+        <h2>Three steps, no window to switch to.</h2>
+        <p>omnihear sits in the background. You don't open it to dictate; you hold a key.</p>
+      </div>
+      <div class="steps">
+        <div class="step"><h3>Hold your hotkey</h3><p>Right Ctrl by default, or any key or combo like <code>ctrl_l+space</code>. A small waveform shows you're recording.</p></div>
+        <div class="step"><h3>Speak normally</h3><p>Audio stays in memory on your machine. Silence is trimmed and the level normalized before transcription.</p></div>
+        <div class="step"><h3>Let go</h3><p><a href="https://github.com/SYSTRAN/faster-whisper">faster-whisper</a> transcribes it locally and the text is typed into the focused field, in order, even if you dictate faster than it transcribes.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="alt" id="features">
+    <div class="wrap">
+      <div class="sec-head">
+        <div class="kicker">Features</div>
+        <h2>Dictation that respects the machine it runs on.</h2>
+        <p>Everything below runs locally. There is no omnihear server.</p>
+      </div>
+      <div class="features">
+        <div class="feature">
+          <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></div>
+          <h3>Private by default</h3><p>Whisper runs on your CPU or GPU. No account, no upload, works offline once a model is downloaded.</p>
+        </div>
+        <div class="feature">
+          <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8M12 18v3"/></svg></div>
+          <h3>Works in every app</h3><p>Types into the focused field like a keyboard would: IDEs, browsers, Slack, email, terminals.</p>
+        </div>
+        <div class="feature">
+          <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 17l6-6-6-6M12 19h8"/></svg></div>
+          <h3>Wayland, natively</h3><p>Built-in virtual keyboard for GNOME, KDE and wlroots. No ydotool daemon to babysit. <code>omnihear --doctor</code> checks your setup.</p>
+        </div>
+        <div class="feature">
+          <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><rect x="9" y="9" width="6" height="6" rx="1"/></svg></div>
+          <h3>Hands-free mode <span class="tag">beta</span></h3><p>Double-tap the hotkey and talk as long as you like, no holding. Tap once more to stop.</p>
+        </div>
+        <div class="feature">
+          <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20h16"/><path d="M14.5 4.5l5 5-8.5 8.5H6v-5z"/></svg></div>
+          <h3>Clean transcripts <span class="tag">beta</span></h3><p>Drops "um" and "uh", and fixes "at 2, actually 3" to "at 3". Careful by design: it leaves your sentence alone when unsure.</p>
+        </div>
+        <div class="feature">
+          <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="4" width="12" height="17" rx="2"/><path d="M9 3h6v3H9z"/></svg></div>
+          <h3>Paste mode <span class="tag">beta</span></h3><p>Long dictations land instantly, in any keyboard layout, and whatever you had copied is put back.</p>
+        </div>
+        <div class="feature">
+          <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/></svg></div>
+          <h3>Dashboard and setup check</h3><p>A local web dashboard: a first-run setup wizard that tests your hotkey and mic live, searchable history with copy buttons, stats, and every setting.</p>
+        </div>
+        <div class="feature">
+          <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/></svg></div>
+          <h3>Voice commands</h3><p>Turn them on to say "comma", "new line", or "scratch that" to erase the last dictation. Optional git commands in X11 terminals.</p>
+        </div>
+        <div class="feature">
+          <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg></div>
+          <h3>Learns your words <span class="tag">beta</span></h3><p>Common Brain picks up the names and jargon you correct often and nudges Whisper toward them next time.</p>
+        </div>
+        <div class="feature">
+          <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>
+          <h3>Ask by voice <span class="tag">beta</span></h3><p>A second hotkey sends your question, plus relevant past dictations, to a local Ollama model and types the answer.</p>
+        </div>
+        <div class="feature">
+          <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9z"/></svg></div>
+          <h3>Light on resources</h3><p>The model loads on first press and unloads after 10 idle minutes. Pick from tiny to large-v3-turbo, CPU int8 or CUDA.</p>
+        </div>
+        <div class="feature">
+          <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg></div>
+          <h3>100 languages</h3><p>Every Whisper language, or auto-detect. English-only models are faster when that's all you need.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <div class="sec-head">
+        <div class="kicker">Why local</div>
+        <h2>Same push-to-talk flow, without the cloud.</h2>
+        <p>Cloud dictation apps are polished, but every word goes to a server. omnihear keeps the loop on your machine.</p>
+      </div>
+      <div class="table-scroll">
+        <table class="compare">
+          <thead><tr><th></th><th>omnihear</th><th>Typical cloud dictation app</th></tr></thead>
+          <tbody>
+            <tr><td>Where audio is processed</td><td class="yes">Your computer</td><td>Vendor servers</td></tr>
+            <tr><td>Works offline</td><td class="yes">Yes</td><td>No</td></tr>
+            <tr><td>Account required</td><td class="yes">No</td><td>Yes</td></tr>
+            <tr><td>Linux (X11 and Wayland)</td><td class="yes">Yes</td><td>Rarely</td></tr>
+            <tr><td>Your history</td><td class="yes">A SQLite file you own</td><td>Vendor's database</td></tr>
+            <tr><td>Choose your model</td><td class="yes">Any faster-whisper model</td><td>Fixed</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section class="alt" id="install">
+    <div class="wrap">
+      <div class="sec-head">
+        <div class="kicker">Install</div>
+        <h2>Pick your platform.</h2>
+        <p>The first hotkey press downloads the Whisper model once (about 150 MB for the default <code>base.en</code>).</p>
+      </div>
+
+      <div class="tabs" role="tablist">
+        <button role="tab" aria-selected="true" data-tab="linux">Ubuntu / Debian</button>
+        <button role="tab" aria-selected="false" data-tab="windows">Windows</button>
+        <button role="tab" aria-selected="false" data-tab="mac">macOS</button>
+      </div>
+
+      <div class="panel on" id="tab-linux" role="tabpanel">
+        <p>Signed APT repository. Updates arrive with <code>sudo apt upgrade</code>. Needs Python 3.11+ (Ubuntu 24.04 or newer, Debian 12 or newer).</p>
+        <div class="code"><button class="copy" type="button">Copy</button><pre>curl -fsSL https://dsb-03.github.io/omni-hear/pubkey.gpg | sudo gpg --dearmor -o /usr/share/keyrings/omnihear.gpg
+echo "deb [signed-by=/usr/share/keyrings/omnihear.gpg] https://dsb-03.github.io/omni-hear/ stable main" \
+  | sudo tee /etc/apt/sources.list.d/omnihear.list
+sudo apt update &amp;&amp; sudo apt install omnihear</pre></div>
+        <p>On Wayland (the Ubuntu default), allow the hotkey to read your keyboard, then log out and back in. Typing works out of the box.</p>
+        <div class="code"><button class="copy" type="button">Copy</button><pre>sudo usermod -aG input $USER</pre></div>
+        <p>Then start it with your desktop session and check the setup:</p>
+        <div class="code"><button class="copy" type="button">Copy</button><pre>systemctl --user enable --now omnihear
+omnihear --doctor</pre></div>
+      </div>
+
+      <div class="panel" id="tab-windows" role="tabpanel">
+        <p>Download <code>omnihear-setup-*.exe</code> from the latest release and run it. omnihear lives in the system tray, with Open Dashboard and Quit.</p>
+        <a class="btn btn-primary" href="https://github.com/dsb-03/omni-hear/releases/latest">Download for Windows</a>
+        <p style="margin-top:18px">The installer isn't code-signed yet, so SmartScreen will warn. Click <b>More info</b> then <b>Run anyway</b>.</p>
+      </div>
+
+      <div class="panel" id="tab-mac" role="tabpanel">
+        <p>Apple Silicon (M1 or later), macOS 11+. Download <code>omnihear-*-arm64.dmg</code>, open it, and drag Omnihear to Applications. It runs from the menu bar.</p>
+        <a class="btn btn-primary" href="https://github.com/dsb-03/omni-hear/releases/latest">Download for macOS</a>
+        <p style="margin-top:18px">On first launch, grant <b>Microphone</b>, <b>Accessibility</b> and <b>Input Monitoring</b> in System Settings &rsaquo; Privacy &amp; Security. The dashboard has one-click links.</p>
+      </div>
+
+      <div class="note" style="margin-top:28px"><b>Dashboard:</b> while omnihear runs, open <code>http://127.0.0.1:4738</code> for history, stats and settings. It only listens on localhost.</div>
+    </div>
+  </section>
+
+  <section id="faq">
+    <div class="wrap">
+      <div class="sec-head"><div class="kicker">FAQ</div><h2>Questions</h2></div>
+      <div class="faq">
+        <details><summary>Does any audio or text leave my computer?</summary><p>No. Recording, transcription and typing all happen locally. The internet is only used to install omnihear and download a Whisper model once. Anonymous usage pings exist but are off unless you opt in, and never include audio or text.</p></details>
+        <details><summary>Does it work on Ubuntu with Wayland?</summary><p>Yes. Ubuntu 24.04 and later, including releases without an X11 session. Hotkeys read your keyboard directly (one-time <code>input</code> group step) and typing uses a built-in virtual keyboard, so there's no ydotool or wtype to set up. It works on GNOME, KDE and wlroots compositors. Run <code>omnihear --doctor</code> if something's off.</p></details>
+        <details><summary>How fast is it?</summary><p>With the default <code>base.en</code> model on a modern laptop CPU, a short sentence usually types within a second of letting go. Larger models are more accurate and slower. With an NVIDIA GPU, set <code>device = "cuda"</code> for large-v3-turbo at interactive speed.</p></details>
+        <details><summary>Which keyboard layouts are supported for typing?</summary><p>On X11, Windows and macOS, any layout. On Wayland, the built-in typer assumes US QWERTY, so a few symbols can come out wrong on other layouts; accented letters and emoji go through IBus (GNOME's default). Paste mode (beta, <code>type_method = "paste"</code>) inserts through the clipboard and works with every layout.</p></details>
+        <details><summary>Can I change the hotkey?</summary><p>Yes. Use any single key (F9, Right Alt, Pause, a letter) or a combo like <code>ctrl_l+space</code>, from the dashboard's Settings or <code>~/.config/omnihear/config.toml</code>.</p></details>
+        <details><summary>Is it free?</summary><p>Yes, and the source is on GitHub.</p></details>
+      </div>
+    </div>
+  </section>
+
+  <section class="alt final">
+    <div class="wrap">
+      <h2>Stop typing everything.</h2>
+      <p>Install takes a minute. Your first dictation takes a second.</p>
+      <div class="cta"><a class="btn btn-primary" href="#install">Install omnihear</a><a class="btn btn-ghost" href="https://github.com/dsb-03/omni-hear/blob/main/ROADMAP.md">See the roadmap</a></div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>omnihear: local push-to-talk dictation.</span>
+    <nav>
+      <a href="https://github.com/dsb-03/omni-hear">Source</a>
+      <a href="https://github.com/dsb-03/omni-hear/releases">Releases</a>
+      <a href="https://github.com/dsb-03/omni-hear/issues">Report an issue</a>
+      <a href="pubkey.gpg">APT signing key</a>
+    </nav>
+  </div>
+</footer>
+
+<script>
+(function () {
+  // theme toggle (persisted per browser; falls back gracefully)
+  var root = document.documentElement, btn = document.getElementById('theme');
+  try { var saved = localStorage.getItem('omnihear-theme'); if (saved) root.setAttribute('data-theme', saved); } catch (e) {}
+  btn.addEventListener('click', function () {
+    var cur = root.getAttribute('data-theme') ||
+      (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    var next = cur === 'dark' ? 'light' : 'dark';
+    root.setAttribute('data-theme', next);
+    try { localStorage.setItem('omnihear-theme', next); } catch (e) {}
+  });
+
+  // install tabs
+  var tabs = document.querySelectorAll('[data-tab]');
+  function show(name) {
+    tabs.forEach(function (t) { t.setAttribute('aria-selected', String(t.dataset.tab === name)); });
+    document.querySelectorAll('.panel').forEach(function (p) { p.classList.toggle('on', p.id === 'tab-' + name); });
+  }
+  tabs.forEach(function (t) { t.addEventListener('click', function () { show(t.dataset.tab); }); });
+  var ua = navigator.userAgent;
+  if (/Windows/.test(ua)) show('windows'); else if (/Macintosh|Mac OS X/.test(ua)) show('mac');
+
+  // copy buttons
+  document.querySelectorAll('.copy').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var text = b.parentNode.querySelector('pre').textContent;
+      var done = function () { b.textContent = 'Copied'; setTimeout(function () { b.textContent = 'Copy'; }, 1400); };
+      if (navigator.clipboard) navigator.clipboard.writeText(text).then(done, function () {});
+    });
+  });
+
+  // Hero demo. The pill is a port of src/omnihear/overlay_anim.py, the
+  // model the real overlay draws: listening = red dot + waveform following
+  // the (simulated) mic level; transcribing = amber spinner + flowing wave.
+  var lines = [
+    "Let's move the design review to Thursday at 3, and loop in Priya for the onboarding flow.",
+    "Quick update: the Wayland build is green, shipping it this afternoon.",
+    "Can you send me the latest numbers before the call? Thanks!"
+  ];
+  var typed = document.getElementById('typed'), key = document.getElementById('key'),
+      pill = document.getElementById('pill'), state = document.getElementById('state');
+  var reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (reduce || !pill.getContext) { typed.textContent = lines[0]; return; }
+
+  var PW = 126, PH = 38, DOT_CX = 19, DOT_R = 4.5, SPIN_R = 6, N = 13,
+      BW = 3, GAP = 3, BMIN = 3, BMAX = 24, X0 = 36, FRAME = 1 / 30;
+  var BG = [17, 19, 24], REC = [255, 75, 62], BUSY = [255, 176, 32], BAR = [237, 240, 245];
+  var dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+  pill.width = PW * dpr; pill.height = PH * dpr;
+  var ctx = pill.getContext('2d');
+  ctx.scale(dpr, dpr);
+
+  function mix(a, b, t) { t = Math.min(1, Math.max(0, t)); return [0, 1, 2].map(function (k) { return a[k] + (b[k] - a[k]) * t; }); }
+  function css(c, a) { return 'rgba(' + Math.round(c[0]) + ',' + Math.round(c[1]) + ',' + Math.round(c[2]) + ',' + (a == null ? 1 : a) + ')'; }
+  function level(rms) { if (rms <= 1e-7) return 0; return Math.min(1, Math.max(0, (20 * Math.log10(rms) + 50) / 32)); }
+
+  var m = { mode: 'hidden', since: 0, env: 0, hist: [0, 0, 0, 0, 0, 0, 0], h: new Array(N).fill(0) };
+  function setMode(mode, now) {
+    if (mode === 'listening') { m.env = 0; m.hist = [0, 0, 0, 0, 0, 0, 0]; }
+    m.mode = mode; m.since = now;
+  }
+  function speech(t) {  // syllable-like envelope at normal speaking level
+    var word = Math.max(0, Math.sin(t * 7)) * (0.6 + 0.4 * Math.sin(t * 1.7));
+    return 0.002 + 0.07 * word + Math.random() * 0.004;
+  }
+  function frame(now) {
+    var t = now - m.since, c = (N - 1) / 2, targets = [], colors = [], dot, ease;
+    if (m.mode === 'transcribing') {
+      var sweep = (t * 0.9) % 1.6 - 0.3;
+      for (var i = 0; i < N; i++) {
+        var wave = 0.5 + 0.5 * Math.sin(t * 5 - i * 0.62);
+        var glow = Math.exp(-Math.pow((i / (N - 1) - sweep) / 0.16, 2));
+        targets.push(0.14 + 0.22 * wave + 0.44 * glow);
+        colors.push(mix(BUSY, BG, 0.55 * (1 - glow)));
+      }
+      dot = { color: BUSY, spinner: (t * 400) % 360 };
+      ease = 0.25;
+    } else {
+      var lv = level(speech(now));
+      m.env = lv > m.env ? lv : m.env * 0.86 + lv * 0.14;
+      m.hist.unshift(m.env); m.hist.length = 7;
+      for (var j = 0; j < N; j++) {
+        var d = Math.abs(j - c);
+        var v = m.hist[d] * (1 - 0.085 * d) * (0.74 + 0.26 * Math.sin(now * 11 + j * 1.9));
+        var idle = 0.06 + 0.05 * (0.5 + 0.5 * Math.sin(now * 3.2 - d * 0.75));
+        targets.push(Math.max(idle, v));
+        colors.push(BAR);
+      }
+      var phase = (t % 1.3) / 1.3;
+      dot = { color: REC, spinner: null, haloR: DOT_R + 1 + phase * 6.5, haloA: 0.45 * (1 - phase) };
+      ease = 0.5;
+    }
+    for (var k = 0; k < N; k++) m.h[k] += (targets[k] - m.h[k]) * ease;
+    return { bars: m.h.map(function (x) { return BMIN + x * (BMAX - BMIN); }), colors: colors, dot: dot };
+  }
+  function draw(fr) {
+    var cy = PH / 2;
+    ctx.clearRect(0, 0, PW, PH);
+    ctx.fillStyle = css(BG, 0.96);
+    ctx.beginPath();
+    ctx.arc(cy, cy, cy - 0.5, Math.PI / 2, Math.PI * 1.5);
+    ctx.arc(PW - cy, cy, cy - 0.5, Math.PI * 1.5, Math.PI / 2);
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.10)'; ctx.lineWidth = 1; ctx.stroke();
+    var d = fr.dot;
+    if (d.spinner == null) {
+      ctx.fillStyle = css(d.color, d.haloA);
+      ctx.beginPath(); ctx.arc(DOT_CX, cy, d.haloR, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = css(d.color);
+      ctx.beginPath(); ctx.arc(DOT_CX, cy, DOT_R, 0, Math.PI * 2); ctx.fill();
+    } else {
+      ctx.lineWidth = 2; ctx.lineCap = 'round';
+      ctx.strokeStyle = css(d.color, 0.25);
+      ctx.beginPath(); ctx.arc(DOT_CX, cy, SPIN_R, 0, Math.PI * 2); ctx.stroke();
+      var a0 = d.spinner * Math.PI / 180;  // canvas angles already run clockwise
+      ctx.strokeStyle = css(d.color);
+      ctx.beginPath(); ctx.arc(DOT_CX, cy, SPIN_R, a0, a0 + 110 * Math.PI / 180); ctx.stroke();
+    }
+    ctx.lineWidth = BW; ctx.lineCap = 'round';
+    fr.bars.forEach(function (bh, i) {
+      var x = X0 + i * (BW + GAP) + BW / 2, half = Math.max(0.25, (bh - BW) / 2);
+      ctx.strokeStyle = css(fr.colors[i]);
+      ctx.beginPath(); ctx.moveTo(x, cy - half); ctx.lineTo(x, cy + half); ctx.stroke();
+    });
+  }
+
+  var last = 0;
+  function loop(ms) {
+    if (m.mode === 'hidden') return;
+    var now = ms / 1000;
+    if (now - last >= FRAME) { last = now; draw(frame(now)); }
+    requestAnimationFrame(loop);
+  }
+  function go(mode) {
+    var now = performance.now() / 1000, wasHidden = m.mode === 'hidden';
+    setMode(mode, now);
+    if (mode !== 'hidden' && wasHidden) requestAnimationFrame(loop);
+  }
+
+  var n = 0;
+  function cycle() {
+    var text = lines[n++ % lines.length];
+    typed.textContent = '';
+    key.classList.add('down'); pill.classList.add('on');
+    state.textContent = 'listening'; go('listening');
+    setTimeout(function () {
+      key.classList.remove('down'); state.textContent = 'transcribing'; go('transcribing');
+      setTimeout(function () {
+        pill.classList.remove('on'); state.textContent = '';
+        setTimeout(function () { go('hidden'); }, 200);
+        var c = 0;
+        var tick = setInterval(function () {
+          c += 2; typed.textContent = text.slice(0, c);
+          if (c >= text.length) { clearInterval(tick); setTimeout(cycle, 2600); }
+        }, 22);
+      }, 900);
+    }, 2400);
+  }
+  setTimeout(cycle, 600);
+})();
+</script>
+</body>
+</html>
