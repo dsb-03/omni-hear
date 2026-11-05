@@ -481,6 +481,70 @@ td.num {
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
+/* Recording overlay preview (Settings) */
+.ov-preview {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 20px;
+  align-items: stretch;
+  flex-wrap: wrap;
+}
+.ov-stage {
+  flex: 1 1 300px;
+  min-height: 120px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  padding: 16px;
+  overflow: hidden;
+  /* A checkerboard so overlay opacity is visible. */
+  background-color: #8a94a6;
+  background-image:
+    linear-gradient(45deg, #7a8496 25%, transparent 25%, transparent 75%, #7a8496 75%),
+    linear-gradient(45deg, #7a8496 25%, transparent 25%, transparent 75%, #7a8496 75%);
+  background-size: 20px 20px;
+  background-position: 0 0, 10px 10px;
+}
+.ov-stage canvas { max-width: 100%; height: auto; }
+.ov-side {
+  flex: 0 1 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+.ov-screen {
+  position: relative;
+  width: 192px;
+  height: 108px;
+  border-radius: 6px;
+  border: 2px solid var(--text-muted);
+  background: var(--code-bg);
+}
+.ov-screen span {
+  position: absolute;
+  border-radius: 3px;
+  background: var(--accent);
+}
+.ov-modes { display: flex; gap: 6px; }
+.ov-modes button {
+  flex: 1;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--card-solid);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.ov-modes button.on { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.cfg-grid label input[type=color] { padding: 2px 4px; height: 38px; cursor: pointer; }
+
 /* Custom Checkbox Toggle Switch */
 label.check {
   flex-direction: row !important;
@@ -1717,6 +1781,8 @@ const MODELS = __MODELS__;
 const LANGUAGE_NAMES = __LANGS__;
 const TYPE_METHODS = __TYPE_METHODS__;
 const CLEANUP_LEVELS = __CLEANUP_LEVELS__;
+// Overlay option lists, ranges and base geometry, from overlay_anim.py.
+const OV = __OVERLAY__;
 const LANGUAGES = [['auto','Auto-detect Language']].concat(
   Object.entries(LANGUAGE_NAMES).map(([c,n]) => [c, `${n} (${c})`]));
 const COMPUTE_TYPES = ['int8','float16','int8_float16','float32'];
@@ -1736,6 +1802,31 @@ const NUMBERS = {
   rag_context_limit: {min: 1, max: 20, step: 1},
   ask_context_limit: {min: 1, max: 20, step: 1},
   max_recording_seconds: {min: 10, max: 3600, step: 10},
+  overlay_scale: {step: 0.1},
+  overlay_opacity: {step: 0.05},
+  overlay_offset_x: {step: 10},
+  overlay_offset_y: {step: 10},
+  overlay_bar_count: {step: 1},
+  overlay_bar_width: {step: 0.5},
+  overlay_bar_gap: {step: 0.5},
+  overlay_bar_height: {step: 1},
+};
+for (const [k, [lo, hi]] of Object.entries(OV.ranges)) Object.assign(NUMBERS[k], {min: lo, max: hi});
+const OVERLAY_KEYS = ['overlay_scale','overlay_position','overlay_offset_x','overlay_offset_y',
+  'overlay_shape','overlay_bg_color','overlay_opacity','overlay_dot_color',
+  'overlay_bar_color','overlay_bar_count','overlay_bar_width','overlay_bar_gap',
+  'overlay_bar_height','overlay_bar_shape'];
+const OVERLAY_LABELS = {
+  overlay_scale: 'Size (scale)', overlay_position: 'Screen position',
+  overlay_offset_x: 'Nudge right (px)', overlay_offset_y: 'Nudge down (px)',
+  overlay_shape: 'Container shape', overlay_bg_color: 'Container colour',
+  overlay_opacity: 'Container opacity', overlay_dot_color: 'Recording dot colour',
+  overlay_bar_color: 'Waveform colour', overlay_bar_count: 'Waveform bars',
+  overlay_bar_width: 'Bar width (px)', overlay_bar_gap: 'Bar spacing (px)',
+  overlay_bar_height: 'Bar max height (px)', overlay_bar_shape: 'Bar shape',
+};
+const OVERLAY_CHOICES = {
+  overlay_position: OV.positions, overlay_shape: OV.shapes, overlay_bar_shape: OV.bar_shapes,
 };
 // Beta-only settings: rendered on #/beta, never in #/settings.
 const BETA_KEYS = ['brain','brain_autocorrect','brain_hotwords','brain_min_count','analytics',
@@ -1749,6 +1840,7 @@ const SECTIONS = [
     'log_prob_threshold','compression_ratio_threshold','condition_on_previous_text']],
   ['Dashboard & SQLite DB', ['dashboard','dashboard_port','history']],
   ['Optional Feedback Behaviors', ['notify','beep','idle_unload_minutes','verbose']],
+  ['Recording Overlay', OVERLAY_KEYS],
 ];
 
 const HELP = {
@@ -1789,8 +1881,23 @@ const HELP = {
   ask_hotkey: 'Second push-to-talk key/combo (e.g. "ctrl_l+space"): hold, ask a question, release to get a locally-generated answer typed instead of the raw transcript. Empty disables it. Requires Ollama installed locally.',
   ask_model: 'Ollama model name used to generate voice Q&A answers (e.g. "llama3.2"). Ollama must be installed and the model pulled locally.',
   ask_context_limit: 'Max past transcriptions retrieved as context for voice Q&A.',
+  overlay_scale: 'Overall size of the recording indicator. 1 is the original compact size.',
+  overlay_position: 'Where on screen the indicator appears.',
+  overlay_offset_x: 'Fine-tune the position: pixels to move right (negative moves left).',
+  overlay_offset_y: 'Fine-tune the position: pixels to move down (negative moves up).',
+  overlay_shape: 'Shape of the indicator container: pill (fully rounded ends), rounded corners, or square.',
+  overlay_bg_color: 'Background colour of the indicator container.',
+  overlay_opacity: 'How opaque the indicator is (0.2 to 1).',
+  overlay_dot_color: 'Colour of the dot (and hands-free stop square) shown while recording.',
+  overlay_bar_color: 'Colour of the waveform bars while recording.',
+  overlay_bar_count: 'Number of waveform bars. Odd numbers keep a single centre bar.',
+  overlay_bar_width: 'Thickness of each waveform bar, before scaling.',
+  overlay_bar_gap: 'Space between waveform bars, before scaling.',
+  overlay_bar_height: 'Height of the tallest waveform bar, before scaling. The container grows to fit.',
+  overlay_bar_shape: 'Waveform bars with rounded ends, or square ends.',
 };
-const pretty = k => k.replace(/_/g, ' ');
+const pretty = k => OVERLAY_LABELS[k] || k.replace(/_/g, ' ');
+const prettyOpt = o => o.replace(/_/g, ' ');
 const keyDisplay = hk => String(hk).split('+').filter(Boolean)
   .map(p => KEY_NAMES[p] || p.toUpperCase()).join(' + ');
 
@@ -1819,6 +1926,13 @@ function fieldHtml(k, v) {
   if (k === 'type_method') return selectOf(k, TYPE_METHODS, v);
   if (k === 'cleanup') return selectOf(k, CLEANUP_LEVELS, v);
   if (k === 'compute_type') return selectOf(k, COMPUTE_TYPES, v);
+  if (k in OVERLAY_CHOICES)
+    return `<label${titleAttr(k)}>${esc(pretty(k))}<select name="${k}">` +
+      OVERLAY_CHOICES[k].map(o =>
+        `<option value="${esc(o)}"${o===v?' selected':''}>${esc(prettyOpt(o))}</option>`).join('') +
+      `</select></label>`;
+  if (k.endsWith('_color'))
+    return `<label${titleAttr(k)}>${esc(pretty(k))}<input type="color" name="${k}" value="${esc(v)}"></label>`;
   if (k === 'model')
     return customSelect(k,
       MODELS.map(m => [m, m === 'base.en' ? 'base.en (default)' : m]),
@@ -1949,12 +2063,181 @@ document.addEventListener('keyup', e => {
   if (capture.seen.size && !capture.held.size) endCapture(false);
 });
 
+// --- Recording overlay live preview ---
+// A JS port of overlay_anim.Style / place() and a trimmed-down version of
+// its listening/transcribing animation; keep the layout maths in sync.
+const OV_PREVIEW_HTML =
+  `<div class="ov-preview"><div class="ov-stage"><canvas id="ov-canvas"></canvas></div>` +
+  `<div class="ov-side"><div class="ov-modes">` +
+  `<button type="button" class="on" data-ov-mode="listening">Listening</button>` +
+  `<button type="button" data-ov-mode="transcribing">Transcribing</button></div>` +
+  `<div>Position on a 1920×1080 screen</div><div class="ov-screen"><span id="ov-marker"></span></div>` +
+  `</div></div>`;
+const ovState = {mode: 'listening', raf: 0, since: 0, env: 0, hist: [], heights: [], n: 0};
+
+function ovClamp(v, lo, hi, d) { v = parseFloat(v); return isNaN(v) ? d : Math.min(hi, Math.max(lo, v)); }
+function ovHex(v, d) { return /^#[0-9a-f]{6}$/i.test(v || '') ? v : d; }
+function ovRgb(h) { return [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16)); }
+function ovMix(a, b, t) { return 'rgb(' + a.map((x, i) => Math.round(x + (b[i] - x) * t)).join(',') + ')'; }
+const ovCss = a => ovMix(a, a, 0);
+
+function ovFormValues() {
+  const f = $('#cfg'), c = {};
+  for (const k of OVERLAY_KEYS) if (f.elements[k]) c[k] = f.elements[k].value;
+  return c;
+}
+
+function ovStyle(c) {
+  const B = OV.base, R = OV.ranges, D = OV.defaults;
+  const st = {};
+  const s = st.scale = ovClamp(c.overlay_scale, ...R.overlay_scale, 1);
+  st.n = Math.trunc(ovClamp(c.overlay_bar_count, ...R.overlay_bar_count, B.n_bars));
+  const bw = ovClamp(c.overlay_bar_width, ...R.overlay_bar_width, B.bar_w);
+  const gap = ovClamp(c.overlay_bar_gap, ...R.overlay_bar_gap, B.bar_gap);
+  const bmax = ovClamp(c.overlay_bar_height, ...R.overlay_bar_height, B.bar_max);
+  st.shape = OV.shapes.includes(c.overlay_shape) ? c.overlay_shape : 'pill';
+  st.roundBars = c.overlay_bar_shape !== 'square';
+  st.opacity = ovClamp(c.overlay_opacity, ...R.overlay_opacity, 0.94);
+  st.bg = ovRgb(ovHex(c.overlay_bg_color, D.overlay_bg_color));
+  st.bar = ovRgb(ovHex(c.overlay_bar_color, D.overlay_bar_color));
+  st.rec = ovRgb(ovHex(c.overlay_dot_color, D.overlay_dot_color));
+  const h = Math.max(B.pill_h, bmax + 14);
+  const left = st.shape === 'pill' ? h / 2 : B.dot_cx;
+  const x0 = left + (B.bars_x0 - B.dot_cx);
+  const right = st.shape === 'pill' ? Math.max(15, h / 2 - 4) : 15;
+  const w = x0 + st.n * (bw + gap) - gap + right;
+  const radius = {pill: h / 2, rounded: Math.min(10, h / 2), square: 0}[st.shape];
+  Object.assign(st, {
+    width: Math.max(1, Math.round(w * s)), height: Math.max(1, Math.round(h * s)),
+    radius: radius * s, dotCx: left * s, dotR: B.dot_r * s,
+    spinnerR: B.spinner_r * s, lineW: 2 * s, haloGrow: 6.5 * s,
+    barW: bw * s, barGap: gap * s, x0: x0 * s, barMax: bmax * s,
+  });
+  st.barMin = Math.min(st.roundBars ? st.barW : 2 * s, st.barMax / 2);
+  st.barX = i => st.x0 + i * (st.barW + st.barGap) + st.barW / 2;
+  return st;
+}
+
+function ovPlace(st, c, sw, sh) {
+  const M = OV.base;
+  const pos = OV.positions.includes(c.overlay_position) ? c.overlay_position : 'bottom_center';
+  let x = pos.endsWith('_left') ? M.margin_side
+        : pos.endsWith('_right') ? sw - st.width - M.margin_side : (sw - st.width) / 2;
+  let y = pos.startsWith('top') ? M.margin_top
+        : pos.startsWith('bottom') ? sh - st.height - M.margin_bottom : (sh - st.height) / 2;
+  x += ovClamp(c.overlay_offset_x, -10000, 10000, 0);
+  y += ovClamp(c.overlay_offset_y, -10000, 10000, 0);
+  return [Math.min(Math.max(0, x), Math.max(0, sw - st.width)),
+          Math.min(Math.max(0, y), Math.max(0, sh - st.height))];
+}
+
+function ovRoundRect(ctx, x, y, w, h, r) {
+  r = Math.max(0, Math.min(r, w / 2, h / 2));
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+function ovDraw(now) {
+  const cv = document.getElementById('ov-canvas');
+  if (!cv || !cv.offsetParent) { ovState.raf = 0; return; }   // left Settings
+  const c = ovFormValues(), st = ovStyle(c);
+  const dpr = window.devicePixelRatio || 1;
+  if (cv.width !== Math.round(st.width * dpr) || cv.height !== Math.round(st.height * dpr)) {
+    cv.width = Math.round(st.width * dpr); cv.height = Math.round(st.height * dpr);
+    cv.style.width = st.width + 'px';
+  }
+  if (ovState.n !== st.n) {
+    ovState.n = st.n; ovState.heights = new Array(st.n).fill(0);
+    ovState.hist = new Array(Math.floor(st.n / 2) + 1).fill(0);
+  }
+  const ctx = cv.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, st.width, st.height);
+  ctx.globalAlpha = st.opacity;
+  const cy = st.height / 2, cx = st.dotCx, n = st.n, B = OV.base;
+  const t = (now - ovState.since) / 1000, k = (B.n_bars - 1) / Math.max(1, n - 1);
+  ovRoundRect(ctx, 0, 0, st.width, st.height, st.radius);
+  ctx.fillStyle = ovCss(st.bg); ctx.fill();
+
+  const targets = [], colors = [], busy = OV.busy;
+  if (ovState.mode === 'transcribing') {
+    const sweep = (t * 0.9) % 1.6 - 0.3;
+    for (let i = 0; i < n; i++) {
+      const x = i / (n - 1), wave = 0.5 + 0.5 * Math.sin(t * 5 - i * k * 0.62);
+      const glow = Math.exp(-(((x - sweep) / 0.16) ** 2));
+      targets.push(0.14 + 0.22 * wave + 0.44 * glow);
+      colors.push(ovMix(busy, st.bg, 0.55 * (1 - glow)));
+    }
+    const sr = st.spinnerR, a = ((t * 400) % 360) * Math.PI / 180 - Math.PI / 2;
+    ctx.lineWidth = st.lineW; ctx.lineCap = 'round';
+    ctx.strokeStyle = ovMix(busy, st.bg, 0.75);
+    ctx.beginPath(); ctx.arc(cx, cy, sr, 0, 2 * Math.PI); ctx.stroke();
+    ctx.strokeStyle = ovCss(busy);
+    ctx.beginPath(); ctx.arc(cx, cy, sr, a, a + 110 * Math.PI / 180); ctx.stroke();
+  } else {
+    // Simulated voice: syllable-like bursts.
+    const level = Math.max(0, Math.sin(t * 2.1) * 0.5 + Math.sin(t * 5.3) * 0.35 + 0.15);
+    ovState.env = level > ovState.env ? level : ovState.env * 0.86 + level * 0.14;
+    ovState.hist.unshift(ovState.env); ovState.hist.length = Math.floor(n / 2) + 1;
+    const centre = Math.floor(n / 2), nowS = now / 1000;
+    for (let i = 0; i < n; i++) {
+      const d = Math.abs(i - centre);
+      let v = ovState.hist[d] * Math.max(0, 1 - 0.085 * d * k);
+      v *= 0.74 + 0.26 * Math.sin(nowS * 11 + i * 1.9);
+      const idle = 0.06 + 0.05 * (0.5 + 0.5 * Math.sin(nowS * 3.2 - d * k * 0.75));
+      targets.push(Math.max(idle, v));
+      colors.push(ovCss(st.bar));
+    }
+    const phase = (t % 1.3) / 1.3, hr = st.dotR + st.scale + phase * st.haloGrow;
+    ctx.fillStyle = ovMix(st.rec, st.bg, 1 - 0.45 * (1 - phase));
+    ctx.beginPath(); ctx.arc(cx, cy, hr, 0, 2 * Math.PI); ctx.fill();
+    ctx.fillStyle = ovCss(st.rec);
+    ctx.beginPath(); ctx.arc(cx, cy, st.dotR, 0, 2 * Math.PI); ctx.fill();
+  }
+  const ease = ovState.mode === 'transcribing' ? 0.25 : 0.5;
+  for (let i = 0; i < n; i++) {
+    ovState.heights[i] += (targets[i] - ovState.heights[i]) * ease;
+    const bh = st.barMin + ovState.heights[i] * (st.barMax - st.barMin);
+    ovRoundRect(ctx, st.barX(i) - st.barW / 2, cy - bh / 2, st.barW, bh,
+                st.roundBars ? st.barW / 2 : 0);
+    ctx.fillStyle = colors[i]; ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
+  // Where it lands on a 1920x1080 screen, drawn at 1/10 scale.
+  const [px, py] = ovPlace(st, c, 1920, 1080), m = $('#ov-marker');
+  if (m) Object.assign(m.style, {left: px / 10 + 'px', top: py / 10 + 'px',
+    width: Math.max(3, st.width / 10) + 'px', height: Math.max(2, st.height / 10) + 'px'});
+  ovState.raf = requestAnimationFrame(ovDraw);
+}
+
+function ovStart() {
+  ovState.since = performance.now();
+  if (!ovState.raf) ovState.raf = requestAnimationFrame(ovDraw);
+}
+
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-ov-mode]');
+  if (!b) return;
+  e.preventDefault();
+  ovState.mode = b.dataset.ovMode;
+  ovState.since = performance.now();
+  document.querySelectorAll('[data-ov-mode]').forEach(x => x.classList.toggle('on', x === b));
+});
+
 async function loadConfig() {
   const cfg = await api('/api/config');
   $('#cfg').innerHTML = SECTIONS.map(([title, keys]) =>
     `<div class="cfg-section"><h3>${title}</h3><div class="cfg-grid">` +
+    (keys === OVERLAY_KEYS ? OV_PREVIEW_HTML : '') +
     keys.filter(k => k in cfg).map(k => fieldHtml(k, cfg[k])).join('') +
     `</div></div>`).join('');
+  ovStart();
   document.querySelectorAll('select[data-custom]').forEach(sel => {
     sel.addEventListener('change', () => {
       $('#' + sel.name + '-custom').style.display =
@@ -2505,6 +2788,27 @@ def _doctor_report(cfg: dict | None) -> dict:
     return {"rows": rows, "ok": not any(r["status"] == "FAIL" for r in rows)}
 
 
+def _overlay_js_consts() -> dict:
+    """Overlay option lists, ranges and base geometry for the Settings
+    preview, so the page never duplicates overlay_anim.py / config.py."""
+    from . import overlay_anim as oa
+    keys = ("overlay_bg_color", "overlay_bar_color", "overlay_dot_color")
+    return {
+        "positions": list(oa.POSITIONS), "shapes": list(oa.SHAPES),
+        "bar_shapes": list(oa.BAR_SHAPES),
+        "ranges": {k: list(v) for k, v in config_mod.OVERLAY_RANGES.items()},
+        "defaults": {k: config_mod.DEFAULTS[k] for k in keys},
+        "busy": [round(c * 255) for c in oa.BUSY],
+        "base": {
+            "pill_h": oa.PILL_H, "dot_cx": oa.DOT_CX, "dot_r": oa.DOT_R,
+            "spinner_r": oa.SPINNER_R, "bars_x0": oa.BARS_X0,
+            "n_bars": oa.N_BARS, "bar_w": oa.BAR_W, "bar_gap": oa.BAR_GAP,
+            "bar_max": oa.BAR_MAX, "margin_bottom": oa.MARGIN_BOTTOM,
+            "margin_top": oa.MARGIN_TOP, "margin_side": oa.MARGIN_SIDE,
+        },
+    }
+
+
 class DashboardHandler(BaseHTTPRequestHandler):
     # set on the server: server.db, server.status_fn, server.brain, server.cfg
 
@@ -2547,6 +2851,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     .replace("__CLEANUP_LEVELS__",
                              json.dumps(list(config_mod.CLEANUP_LEVELS)))
                     .replace("__PLATFORM__", json.dumps(sys.platform))
+                    .replace("__OVERLAY__", json.dumps(_overlay_js_consts()))
                     .replace("__TYPE_METHODS__",
                              json.dumps(["auto", "pynput", "paste"]
                                         if sys.platform in ("win32", "darwin")
