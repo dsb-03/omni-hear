@@ -4,6 +4,9 @@ Used on Wayland where pynput cannot receive global key events. Requires
 the user to be able to open keyboard devices (typically: membership in
 the `input` group). No pip dependency — reads the kernel input_event
 struct directly.
+
+ComboMatcher (exact-set combo matching) is backend-agnostic: app.py's
+pynput listener (X11, Windows, macOS) uses it too.
 """
 
 from __future__ import annotations
@@ -140,21 +143,58 @@ def _readable(path: Path) -> bool:
         return False
 
 
-class HotkeyMonitor:
-    """Listen for combo press/release on all readable keyboard devices."""
+class ComboMatcher:
+    """Exact-set hotkey matching over a stream of key presses and releases.
 
-    def __init__(self, combo: frozenset[int],
-                 on_dictate_start, on_stop,
-                 ask_combo: frozenset[int] | None = None,
-                 on_ask_start=None):
-        self.combo = combo
-        self.ask_combo = ask_combo
-        self.on_dictate_start = on_dictate_start
-        self.on_ask_start = on_ask_start
-        self.on_stop = on_stop
+    Shared by HotkeyMonitor (linux keycodes) and app.py's pynput listener
+    (pynput keys), so both backends behave the same. `bindings` is a list of
+    (combo, on_press, on_release). on_press() fires when the set of held
+    watched keys becomes exactly `combo`, which makes the binding active;
+    on_release() (None = no callback) fires once, when the first key of an
+    active combo goes up. Pressing a key that is already down (key repeat)
+    changes nothing. Feed it from a single thread.
+    """
+
+    def __init__(self, bindings):
+        self.bindings = [(frozenset(c), on_press, on_release)
+                         for c, on_press, on_release in bindings]
+        self.watched = frozenset().union(*(b[0] for b in self.bindings))
+        self.pressed: set = set()
+        self._active: set[int] = set()   # indexes of matched, still-held bindings
+
+    def press(self, key) -> None:
+        if key not in self.watched or key in self.pressed:
+            return
+        self.pressed.add(key)
+        for i, (combo, on_press, _) in enumerate(self.bindings):
+            if i not in self._active and combo == self.pressed:
+                self._active.add(i)
+                if on_press is not None:
+                    on_press()
+
+    def release(self, key) -> None:
+        if key not in self.pressed:
+            return
+        self.pressed.discard(key)
+        for i in sorted(self._active):
+            combo, _, on_release = self.bindings[i]
+            if key in combo:
+                self._active.discard(i)
+                if on_release is not None:
+                    on_release()
+
+
+class HotkeyMonitor:
+    """Feed key events from every readable keyboard into a ComboMatcher.
+
+    bindings: [(combo of linux keycodes, on_press, on_release)], see
+    ComboMatcher. Callbacks run on the monitor thread.
+    """
+
+    def __init__(self, bindings):
+        self.matcher = ComboMatcher(bindings)
         self._stop = threading.Event()
         self._thread = None
-        self._watched = combo | (ask_combo or frozenset())
 
     def start(self):
         self._thread = threading.Thread(target=self._loop, name="evdev-hotkey",
@@ -187,20 +227,28 @@ class HotkeyMonitor:
             except OSError:
                 continue
 
-    def _drop(self, fds: dict[int, Path], fd: int, pressed: set[int]) -> None:
-        """Forget an unplugged device; release anything it was holding."""
+    def _key_up(self, held: dict[int, set[int]], code: int) -> None:
+        """Release `code` unless another keyboard is still holding it."""
+        if not any(code in keys for keys in held.values()):
+            self.matcher.release(code)
+
+    def _drop(self, fds: dict[int, Path], held: dict[int, set[int]],
+              fd: int) -> None:
+        """Forget an unplugged device; release the keys it was holding."""
         fds.pop(fd, None)
         try:
             os.close(fd)
         except OSError:
             pass
-        if pressed:
-            pressed.clear()
-            self.on_stop()
+        for code in held.pop(fd, ()):
+            self._key_up(held, code)
 
     def _loop(self):
         fds: dict[int, Path] = {}
-        pressed: set[int] = set()
+        # Watched keys each device holds, so unplugging one keyboard only
+        # releases what that keyboard was holding.
+        held: dict[int, set[int]] = {}
+        watched = self.matcher.watched
         next_scan = 0.0
         try:
             while not self._stop.is_set():
@@ -220,25 +268,19 @@ class HotkeyMonitor:
                             break
                         except OSError:
                             # ENODEV: keyboard unplugged / BT disconnected.
-                            self._drop(fds, fd, pressed)
+                            self._drop(fds, held, fd)
                             break
                         if len(raw) < _EVENT_SIZE:
                             break
                         _, _, etype, code, value = struct.unpack(_EVENT_FMT, raw)
-                        if etype != EV_KEY or code not in self._watched:
+                        if etype != EV_KEY or code not in watched:
                             continue
                         if value == KEY_DOWN:
-                            pressed.add(code)
-                            if pressed == self.combo:
-                                self.on_dictate_start()
-                            elif (self.ask_combo is not None
-                                  and pressed == self.ask_combo
-                                  and self.on_ask_start is not None):
-                                self.on_ask_start()
+                            held.setdefault(fd, set()).add(code)
+                            self.matcher.press(code)
                         elif value == KEY_UP:
-                            if code in pressed:
-                                pressed.discard(code)
-                                self.on_stop()
+                            held.get(fd, set()).discard(code)
+                            self._key_up(held, code)
         finally:
             for fd in fds:
                 try:

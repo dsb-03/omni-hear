@@ -10,6 +10,10 @@ driven by the live microphone level. The newest level sits in the centre
 and ripples outward, so the bars visibly follow your voice. If no signal
 at all arrives in the first 1.5 s (muted or wrong mic), it turns grey.
 
+Locked (hands-free, recording continues without holding the key): the
+listening dot becomes a small rounded "stop" square, halo still pulsing,
+so it reads as "tap to stop".
+
 Transcribing: the dot becomes an amber spinner and the bars ease into a
 smooth travelling wave with a highlight sweeping across. It reads as
 "working", not "hearing".
@@ -26,6 +30,9 @@ from typing import NamedTuple
 # centred on the dot (left) and just past the last bar (right).
 PILL_W, PILL_H = 126, 38
 DOT_CX, DOT_R = 19.0, 4.5
+# Locked: rounded stop square (half side, corner radius). A bit larger than
+# the dot so it still reads as a square on Tk's aliased 1x canvas.
+STOP_HALF, STOP_CORNER = 5.0, 2.0
 SPINNER_R = 6.0
 N_BARS = 13
 BAR_W, BAR_GAP = 3.0, 3.0
@@ -50,6 +57,7 @@ class Dot(NamedTuple):
     spinner: float | None   # clockwise degrees while transcribing, else None
     halo_r: float
     halo_alpha: float
+    stop: bool = False      # locked: draw a rounded stop square, not a dot
 
 
 class Frame(NamedTuple):
@@ -86,11 +94,12 @@ def level_from_rms(rms: float) -> float:
 
 class OverlayAnimation:
     """Call set_level() from the audio thread, set_mode() and frame() from
-    the GUI thread. Shared fields are plain floats/bools, so cross-thread
-    writes are atomic under the GIL."""
+    the GUI thread; `locked` may be set from any thread. Shared fields are
+    plain floats/bools, so cross-thread writes are atomic under the GIL."""
 
     def __init__(self):
         self.mode = "hidden"              # "listening" | "transcribing" | "hidden"
+        self.locked = False               # hands-free lock: dot -> stop square
         self._rms = 0.0
         self._heard = False               # any real signal since listening began
         self._env = 0.0
@@ -153,8 +162,13 @@ class OverlayAnimation:
                 targets[i] = max(idle, v)
             colors = [MUTED if no_signal else BAR] * N_BARS
             phase = (t % 1.3) / 1.3
+            # The halo grows from just outside the dot, or the stop square's
+            # rounded corners when locked.
+            extent = ((STOP_HALF - STOP_CORNER) * math.sqrt(2) + STOP_CORNER
+                      if self.locked else DOT_R)
             dot = Dot(MUTED if no_signal else REC, None,
-                      DOT_R + 1.0 + phase * 6.5, 0.45 * (1.0 - phase))
+                      extent + 1.0 + phase * 6.5, 0.45 * (1.0 - phase),
+                      self.locked)
             ease = 0.5
 
         for i in range(N_BARS):
@@ -181,9 +195,24 @@ if __name__ == "__main__":
     muted = b.frame(time.monotonic() + NO_SIGNAL_SECONDS + 0.1)
     assert muted.no_signal and muted.colors[0] == MUTED, "never heard anything -> grey"
 
+    assert not loud.dot.stop, "unlocked listening draws the round dot"
+    a.locked = True                             # hands-free lock
+    lk1 = a.frame(t0 + 0.6)
+    lk2 = a.frame(t0 + 1.1)
+    assert lk1.dot.stop and lk1.dot.spinner is None and lk1.dot.color == REC, \
+        "locked: red stop square"
+    assert lk1.dot.halo_alpha > 0 and lk1.dot.halo_r != lk2.dot.halo_r, \
+        "locked: halo keeps pulsing"
+    smallest = a.frame(a._mode_since + 2.61).dot      # start of a pulse
+    assert smallest.halo_r > STOP_HALF * math.sqrt(2), "halo starts outside the square"
+    b.locked = True
+    grey = b.frame(time.monotonic() + NO_SIGNAL_SECONDS + 0.2).dot
+    assert grey.stop and grey.color == MUTED, "locked + no signal -> grey square"
+
     a.set_mode("transcribing")
     busy = a.frame()
     assert busy.dot.spinner is not None and busy.dot.color == BUSY
+    assert not busy.dot.stop, "only the listening dot turns into a stop square"
     assert level_from_rms(0.0) == 0.0 and level_from_rms(1.0) == 1.0
     assert to_hex((1.0, 0.294, 0.243)) == "#ff4b3e"
     print("overlay_anim self-check OK")

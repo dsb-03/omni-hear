@@ -7,7 +7,8 @@ never steals keyboard focus from the field being typed into.
 
 It draws the same animation as the Tk overlay, from the shared model in
 overlay_anim.py: while listening, a red dot with a pulsing halo next to a
-waveform that follows the live mic level; while transcribing, an amber
+waveform that follows the live mic level (a rounded stop square instead of
+the dot while hands-free recording is locked); while transcribing, an amber
 spinner and a flowing wave.
 
 State changes arrive from the recorder/worker threads and are marshalled
@@ -17,7 +18,7 @@ is visible. set_level() is called from the audio thread and touches only the
 pure-Python model, never AppKit. pyobjc is already a dependency on macOS.
 
 Public interface mirrors the Tk RecordingOverlay: show(),
-show_transcribing(), hide(), set_level().
+show_transcribing(), hide(), set_level(), set_locked().
 """
 
 import objc
@@ -72,10 +73,15 @@ class OmnihearPillView(NSView):
                 _ns(d.color, d.halo_alpha).setFill()
                 NSBezierPath.bezierPathWithOvalInRect_(
                     NSMakeRect(cx - r, cy - r, 2 * r, 2 * r)).fill()
-            r = oa.DOT_R
             _ns(d.color).setFill()
-            NSBezierPath.bezierPathWithOvalInRect_(
-                NSMakeRect(cx - r, cy - r, 2 * r, 2 * r)).fill()
+            if d.stop:   # hands-free locked: rounded "stop" square
+                s, c = oa.STOP_HALF, oa.STOP_CORNER
+                NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius_(
+                    NSMakeRect(cx - s, cy - s, 2 * s, 2 * s), c, c).fill()
+            else:
+                r = oa.DOT_R
+                NSBezierPath.bezierPathWithOvalInRect_(
+                    NSMakeRect(cx - r, cy - r, 2 * r, 2 * r)).fill()
         else:
             sr = oa.SPINNER_R
             track = NSBezierPath.bezierPathWithOvalInRect_(
@@ -231,8 +237,14 @@ class MacOverlay:
         self._dispatch("showTranscribing")
 
     def hide(self):
+        self._anim.locked = False
         self._dispatch("hideOverlay")
 
     def set_level(self, rms):
         # Pure-Python model update (atomic float writes); safe off-main-thread.
         self._anim.set_level(rms)
+
+    def set_locked(self, flag):
+        """Hands-free lock: the listening dot becomes a stop square. A plain
+        model attribute like set_level(); the next tick draws it."""
+        self._anim.locked = bool(flag)
