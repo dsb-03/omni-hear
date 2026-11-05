@@ -30,6 +30,7 @@ python3 -m py_compile src/omnihear/*.py
 GPG_KEY_ID=divyanshu.s.butola@gmail.com ./scripts/update-apt-repo.sh omnihear_1.2.0_amd64.deb
 git add docs/ && git commit -m "Publish omnihear 1.2.0" && git push
 # or push a tag v1.2.0 to trigger .github/workflows/release.yml (requires GPG_* repo secrets)
+# or Linux-only (APT repo, no tag/GitHub Release): Actions -> "Release (Linux only)" -> Run workflow on main with a version (.github/workflows/release-linux.yml)
 ```
 
 Modules importable without the heavy deps (`config`, `db`, `dashboard`) can be exercised standalone; heavy imports (faster_whisper, sounddevice, pynput, numpy) are deliberately kept inside functions in `app.py` so `--help`, `--write-config`, and the dashboard work in environments without them. Preserve this property.
