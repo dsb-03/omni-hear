@@ -2,8 +2,10 @@
 
 macOS can't use the Tkinter overlay (Cocoa GUI must run on the main thread,
 which the pystray menu-bar icon owns). Instead this draws a borderless,
-click-through, non-activating NSPanel bottom-centre of the screen, so it
-never steals keyboard focus from the field being typed into.
+click-through, non-activating NSPanel (bottom-centre by default; size,
+colours, shapes and position come from the overlay_* config keys via
+overlay_anim.Style / place()), so it never steals keyboard focus from the
+field being typed into.
 
 It draws the same animation as the Tk overlay, from the shared model in
 overlay_anim.py: while listening, a red dot with a pulsing halo next to a
@@ -38,9 +40,6 @@ NSWindowStyleMaskBorderless = 0
 NSWindowStyleMaskNonactivatingPanel = 1 << 7
 NSLineCapStyleRound = 1
 
-_W, _H = float(oa.PILL_W), float(oa.PILL_H)
-
-
 def _ns(rgb, alpha=1.0):
     r, g, b = rgb
     return NSColor.colorWithCalibratedRed_green_blue_alpha_(r, g, b, alpha)
@@ -54,18 +53,21 @@ class OmnihearPillView(NSView):
         if self is None:
             return None
         self.frame_state = None
+        self.style = oa.Style()
         return self
 
     def drawRect_(self, rect):
-        cy = _H / 2.0
-        _ns(oa.BG, 0.94).setFill()
+        st = self.style
+        W, H = float(st.width), float(st.height)
+        cy = H / 2.0   # symmetric, so AppKit's y-up doesn't matter
+        _ns(st.bg, st.opacity).setFill()
         NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius_(
-            NSMakeRect(0, 0, _W, _H), cy, cy).fill()
+            NSMakeRect(0, 0, W, H), st.radius, st.radius).fill()
         fr = self.frame_state
         if fr is None:
             return
 
-        cx = oa.DOT_CX
+        cx = st.dot_cx
         d = fr.dot
         if d.spinner is None:
             if d.halo_alpha > 0.01:
@@ -75,18 +77,18 @@ class OmnihearPillView(NSView):
                     NSMakeRect(cx - r, cy - r, 2 * r, 2 * r)).fill()
             _ns(d.color).setFill()
             if d.stop:   # hands-free locked: rounded "stop" square
-                s, c = oa.STOP_HALF, oa.STOP_CORNER
+                s, c = st.stop_half, st.stop_corner
                 NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius_(
                     NSMakeRect(cx - s, cy - s, 2 * s, 2 * s), c, c).fill()
             else:
-                r = oa.DOT_R
+                r = st.dot_r
                 NSBezierPath.bezierPathWithOvalInRect_(
                     NSMakeRect(cx - r, cy - r, 2 * r, 2 * r)).fill()
         else:
-            sr = oa.SPINNER_R
+            sr = st.spinner_r
             track = NSBezierPath.bezierPathWithOvalInRect_(
                 NSMakeRect(cx - sr, cy - sr, 2 * sr, 2 * sr))
-            track.setLineWidth_(2.0)
+            track.setLineWidth_(st.line_w)
             _ns(d.color, 0.25).setStroke()
             track.stroke()
             # The model's angle runs clockwise; AppKit's run counter-clockwise.
@@ -94,17 +96,18 @@ class OmnihearPillView(NSView):
             arc = NSBezierPath.bezierPath()
             arc.appendBezierPathWithArcWithCenter_radius_startAngle_endAngle_clockwise_(
                 NSMakePoint(cx, cy), sr, start, start + 110.0, False)
-            arc.setLineWidth_(2.0)
+            arc.setLineWidth_(st.line_w)
             arc.setLineCapStyle_(NSLineCapStyleRound)
             _ns(d.color).setStroke()
             arc.stroke()
 
-        rad = oa.BAR_W / 2.0
+        bw = st.bar_w
+        rad = bw / 2.0 if st.round_bars else 0.0
         for i, (h, col) in enumerate(zip(fr.bars, fr.colors)):
-            x = oa.BARS_X0 + i * (oa.BAR_W + oa.BAR_GAP)
+            x = st.bar_x(i) - bw / 2.0
             _ns(col).setFill()
             NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius_(
-                NSMakeRect(x, cy - h / 2.0, oa.BAR_W, h), rad, rad).fill()
+                NSMakeRect(x, cy - h / 2.0, bw, h), rad, rad).fill()
 
 
 class _OverlayController(NSObject):
@@ -114,19 +117,30 @@ class _OverlayController(NSObject):
         self = objc.super(_OverlayController, self).init()
         if self is None:
             return None
+        self._cfg = {}
+        self._style = oa.Style()
         self._panel = None
         self._view = None
         self._timer = None
         self._closing = False
         self._alpha = 0.0
-        self.anim = oa.OverlayAnimation()
+        self.anim = oa.OverlayAnimation(self._style)
         return self
+
+    @objc.python_method
+    def configure(self, cfg):
+        """Apply the overlay_* config keys. Call before the panel is built
+        (i.e. before the first show)."""
+        self._cfg = dict(cfg or {})
+        self._style = oa.Style(self._cfg)
+        self.anim = oa.OverlayAnimation(self._style)
 
     # -- construction --------------------------------------------------
     @objc.python_method
     def _build(self):
+        W, H = float(self._style.width), float(self._style.height)
         panel = NSPanel.alloc().initWithContentRect_styleMask_backing_defer_(
-            NSMakeRect(0, 0, _W, _H),
+            NSMakeRect(0, 0, W, H),
             NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel,
             NSBackingStoreBuffered, False,
         )
@@ -141,7 +155,8 @@ class _OverlayController(NSObject):
             | NSWindowCollectionBehaviorStationary
             | NSWindowCollectionBehaviorFullScreenAuxiliary
         )
-        view = OmnihearPillView.alloc().initWithFrame_(NSMakeRect(0, 0, _W, _H))
+        view = OmnihearPillView.alloc().initWithFrame_(NSMakeRect(0, 0, W, H))
+        view.style = self._style
         panel.setContentView_(view)
         self._panel = panel
         self._view = view
@@ -152,8 +167,10 @@ class _OverlayController(NSObject):
         if screen is None or self._panel is None:
             return
         vf = screen.visibleFrame()
-        x = vf.origin.x + (vf.size.width - _W) / 2.0
-        y = vf.origin.y + 90.0
+        # place() works top-down; AppKit's origin is bottom-left.
+        px, py = oa.place(self._style, self._cfg, vf.size.width, vf.size.height)
+        x = vf.origin.x + px
+        y = vf.origin.y + vf.size.height - py - self._style.height
         self._panel.setFrameOrigin_(NSMakePoint(x, y))
 
     @objc.python_method
@@ -222,8 +239,9 @@ class MacOverlay:
     """Thread-safe façade: methods can be called from any thread; UI calls
     hop to the main thread where the AppKit panel lives."""
 
-    def __init__(self):
+    def __init__(self, cfg=None):
         self._ctrl = _OverlayController.alloc().init()
+        self._ctrl.configure(cfg)
         self._anim = self._ctrl.anim
 
     def _dispatch(self, selector):

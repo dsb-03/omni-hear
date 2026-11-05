@@ -52,23 +52,79 @@ def _pill_points(x0, y0, x1, y1, r):
             x1 - r, y1, x0 + r, y1, x0, y1, x0, y1 - r, x0, y0 + r, x0, y0]
 
 
+def _x11_shape_rounded(root, w, h, r):
+    """Clip the overlay's X11 window to a w x h rounded rectangle (corner
+    radius r) with the X SHAPE extension, via ctypes on libX11/libXext.
+    Best-effort: returns False and leaves a plain rectangle when the
+    libraries or extension are missing."""
+    try:
+        import ctypes
+        import ctypes.util
+        from ctypes import c_short, c_ushort, c_int, c_ulong, c_void_p, c_char_p
+
+        x11 = ctypes.CDLL(ctypes.util.find_library("X11") or "libX11.so.6")
+        xext = ctypes.CDLL(ctypes.util.find_library("Xext") or "libXext.so.6")
+
+        class XRectangle(ctypes.Structure):
+            _fields_ = [("x", c_short), ("y", c_short),
+                        ("width", c_ushort), ("height", c_ushort)]
+
+        x11.XOpenDisplay.restype = c_void_p
+        x11.XOpenDisplay.argtypes = [c_char_p]
+        x11.XFlush.argtypes = [c_void_p]
+        x11.XCloseDisplay.argtypes = [c_void_p]
+        xext.XShapeQueryExtension.argtypes = [c_void_p, ctypes.POINTER(c_int),
+                                              ctypes.POINTER(c_int)]
+        xext.XShapeCombineRectangles.argtypes = [
+            c_void_p, c_ulong, c_int, c_int, c_int,
+            ctypes.POINTER(XRectangle), c_int, c_int, c_int]
+
+        root.update_idletasks()             # make Tk create the X window
+        win = int(root.wm_frame(), 16)      # the toplevel's outer window
+        dpy = x11.XOpenDisplay(root.winfo_screen().encode())
+        if not dpy:
+            return False
+        try:
+            ev, er = c_int(), c_int()
+            if not xext.XShapeQueryExtension(dpy, ctypes.byref(ev), ctypes.byref(er)):
+                return False
+            r = min(r, w / 2, h / 2)
+            rows = []
+            for y in range(h):
+                # Inset of this row at the rounded corners (circle of radius r).
+                dy = max(0.0, r - (y + 0.5), (y + 0.5) - (h - r))
+                inset = round(r - (max(0.0, r * r - dy * dy)) ** 0.5) if dy else 0
+                rows.append(XRectangle(inset, y, max(1, w - 2 * inset), 1))
+            arr = (XRectangle * len(rows))(*rows)
+            # ShapeBounding = 0, ShapeSet = 0, Unsorted = 0
+            xext.XShapeCombineRectangles(dpy, win, 0, 0, 0, arr, len(rows), 0, 0)
+            x11.XFlush(dpy)
+        finally:
+            x11.XCloseDisplay(dpy)
+        return True
+    except Exception:
+        return False
+
+
 class RecordingOverlay:
-    """Floating pill bottom-centre of the screen (Tk: Linux X11/XWayland and
-    Windows). Listening: red dot + waveform that follows the live mic level;
-    the dot becomes a rounded stop square while hands-free recording is
-    locked. Transcribing: amber spinner + flowing wave. Drawing comes from
-    the shared model in overlay_anim.py, which the macOS overlay uses too.
+    """Floating pill on screen (Tk: Linux X11/XWayland and Windows),
+    bottom-centre by default. Listening: red dot + waveform that follows the
+    live mic level; the dot becomes a rounded stop square while hands-free
+    recording is locked. Transcribing: amber spinner + flowing wave. Drawing
+    comes from the shared model in overlay_anim.py, which the macOS overlay
+    uses too; size, colours, shapes and position come from the overlay_*
+    config keys (overlay_anim.Style / place()).
 
     show()/show_transcribing()/hide() are called from any thread and queued
     to the Tk thread; set_level() is called from the audio callback and
     set_locked() from any thread (both just set model attributes).
     """
 
-    _ALPHA = 0.94
-
-    def __init__(self):
-        from .overlay_anim import OverlayAnimation
-        self.anim = OverlayAnimation()
+    def __init__(self, cfg: dict | None = None):
+        from .overlay_anim import OverlayAnimation, Style
+        self.cfg = dict(cfg or {})
+        self.style = Style(self.cfg)
+        self.anim = OverlayAnimation(self.style)
         self.root = None
         self.queue = queue.Queue()
         self.thread = threading.Thread(target=self._run, daemon=True)
@@ -80,6 +136,7 @@ class RecordingOverlay:
         except ImportError:
             return
         from . import overlay_anim as oa
+        sty = self.style
 
         try:
             # Under Wayland this is an XWayland window; with no X display
@@ -92,58 +149,68 @@ class RecordingOverlay:
         root.overrideredirect(True)
         root.attributes("-topmost", True)
 
-        # Bottom-centre, just above the taskbar/dock: near where you look
-        # while typing.
-        w, h = oa.PILL_W, oa.PILL_H
+        w, h = sty.width, sty.height
         try:
-            x = (root.winfo_screenwidth() - w) // 2
-            y = root.winfo_screenheight() - h - 90
+            x, y = oa.place(sty, self.cfg, root.winfo_screenwidth(),
+                            root.winfo_screenheight())
             root.geometry(f"{w}x{h}+{x}+{y}")
         except Exception:
             root.geometry(f"{w}x{h}+900+900")
 
-        bg = oa.to_hex(oa.BG)
+        bg = oa.to_hex(sty.bg)
         window_bg = bg
         outline = ""
         if sys.platform == "win32":
             # A colour key makes everything outside the pill transparent, so
-            # Windows gets real rounded ends. Plain Tk on X11 has no window
-            # shaping; there the pill fills a small dark rectangle.
+            # Windows gets real rounded ends.
             key = "#010203"
             try:
                 root.attributes("-transparentcolor", key)
                 window_bg = key
-                outline = oa.to_hex(oa.EDGE)
+                outline = oa.to_hex(sty.edge)
             except tk.TclError:
                 pass
+        elif sty.radius > 0:
+            # X11 has no colour key; clip the window itself to the shape.
+            # Without the SHAPE extension the pill fills a small rectangle.
+            _x11_shape_rounded(root, w, h, sty.radius)
         root.configure(bg=window_bg)
 
         canvas = tk.Canvas(root, width=w, height=h, bg=window_bg,
                            highlightthickness=0, bd=0)
         canvas.pack(fill="both", expand=True)
-        canvas.create_polygon(_pill_points(0.5, 0.5, w - 0.5, h - 0.5, h / 2),
-                              smooth=True, fill=bg, outline=outline)
+        if sty.radius > 0:
+            canvas.create_polygon(
+                _pill_points(0.5, 0.5, w - 0.5, h - 0.5, sty.radius),
+                smooth=True, fill=bg, outline=outline)
+        else:
+            canvas.create_rectangle(0, 0, w - 1, h - 1, fill=bg, outline=outline)
 
-        cx, cy = oa.DOT_CX, h / 2
-        sr = oa.SPINNER_R
+        cx, cy = sty.dot_cx, sty.cy
+        sr, dr = sty.spinner_r, sty.dot_r
+        rec = oa.to_hex(sty.rec)
         halo = canvas.create_oval(0, 0, 0, 0, fill=bg, outline="")
-        dot = canvas.create_oval(cx - oa.DOT_R, cy - oa.DOT_R,
-                                 cx + oa.DOT_R, cy + oa.DOT_R,
-                                 fill=oa.to_hex(oa.REC), outline="")
-        s = oa.STOP_HALF
+        dot = canvas.create_oval(cx - dr, cy - dr, cx + dr, cy + dr,
+                                 fill=rec, outline="")
+        s = sty.stop_half
         stop_sq = canvas.create_polygon(
-            _pill_points(cx - s, cy - s, cx + s, cy + s, oa.STOP_CORNER),
-            smooth=True, fill=oa.to_hex(oa.REC), outline="", state="hidden")
-        track = canvas.create_oval(cx - sr, cy - sr, cx + sr, cy + sr, width=2,
-                                   outline=oa.to_hex(oa.mix(oa.BUSY, oa.BG, 0.75)),
+            _pill_points(cx - s, cy - s, cx + s, cy + s, sty.stop_corner),
+            smooth=True, fill=rec, outline="", state="hidden")
+        track = canvas.create_oval(cx - sr, cy - sr, cx + sr, cy + sr,
+                                   width=sty.line_w,
+                                   outline=oa.to_hex(oa.mix(sty.busy, sty.bg, 0.75)),
                                    state="hidden")
         spinner = canvas.create_arc(cx - sr, cy - sr, cx + sr, cy + sr,
-                                    start=90, extent=110, style="arc", width=2,
-                                    outline=oa.to_hex(oa.BUSY), state="hidden")
-        bars = [canvas.create_line(oa.bar_x(i), cy, oa.bar_x(i), cy,
-                                   width=oa.BAR_W, capstyle="round",
-                                   fill=oa.to_hex(oa.BAR))
-                for i in range(oa.N_BARS)]
+                                    start=90, extent=110, style="arc",
+                                    width=sty.line_w,
+                                    outline=oa.to_hex(sty.busy), state="hidden")
+        cap = "round" if sty.round_bars else "butt"
+        # Round caps add bar_w/2 at each end of the line; butt caps add none.
+        cap_add = sty.bar_w if sty.round_bars else 0.0
+        bars = [canvas.create_line(sty.bar_x(i), cy, sty.bar_x(i), cy,
+                                   width=sty.bar_w, capstyle=cap,
+                                   fill=oa.to_hex(sty.bar))
+                for i in range(sty.n_bars)]
 
         def set_alpha(a):
             try:
@@ -159,7 +226,7 @@ class RecordingOverlay:
                 canvas.coords(halo, cx - r, cy - r, cx + r, cy + r)
                 canvas.itemconfigure(
                     halo, state="normal",
-                    fill=oa.to_hex(oa.mix(d.color, oa.BG, 1.0 - d.halo_alpha)))
+                    fill=oa.to_hex(oa.mix(d.color, sty.bg, 1.0 - d.halo_alpha)))
                 # Locked (hands-free): stop square instead of the dot.
                 shown, hidden = (stop_sq, dot) if d.stop else (dot, stop_sq)
                 canvas.itemconfigure(shown, state="normal", fill=oa.to_hex(d.color))
@@ -174,9 +241,8 @@ class RecordingOverlay:
                 # Tk angles run counter-clockwise; the model's run clockwise.
                 canvas.itemconfigure(spinner, state="normal", start=-d.spinner)
             for i, (item, bh, col) in enumerate(zip(bars, fr.bars, fr.colors)):
-                # Round caps add BAR_W/2 at each end of the line.
-                half = max(0.25, (bh - oa.BAR_W) / 2)
-                x = oa.bar_x(i)
+                half = max(0.25, (bh - cap_add) / 2)
+                x = sty.bar_x(i)
                 canvas.coords(item, x, cy - half, x, cy + half)
                 canvas.itemconfigure(item, fill=oa.to_hex(col))
 
@@ -205,7 +271,7 @@ class RecordingOverlay:
                 draw(self.anim.frame())
                 # Quick fade in/out (~150 ms). Where -alpha is unsupported,
                 # show and hide happen immediately.
-                target = 0.0 if st["closing"] else self._ALPHA
+                target = 0.0 if st["closing"] else sty.opacity
                 st["alpha"] += (target - st["alpha"]) * 0.45
                 if abs(st["alpha"] - target) < 0.03:
                     st["alpha"] = target
@@ -299,9 +365,9 @@ class App:
         try:
             if sys.platform == "darwin":
                 from .macos_overlay import MacOverlay
-                self._overlay = MacOverlay()
+                self._overlay = MacOverlay(cfg)
             else:
-                self._overlay = RecordingOverlay()
+                self._overlay = RecordingOverlay(cfg)
         except Exception as e:
             print(f"omnihear: warning: overlay could not start: {e}")
         # Feeds the live mic level to the overlay (None if it has no meter).

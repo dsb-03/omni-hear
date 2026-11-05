@@ -52,6 +52,25 @@ def is_paste_shortcut(name: str) -> bool:
     return parts in PASTE_SHORTCUTS
 
 
+# Recording overlay customisation (overlay_* keys). The option lists live in
+# overlay_anim.py (pure stdlib, no GUI imports) next to the code using them.
+from .overlay_anim import (POSITIONS as OVERLAY_POSITIONS,  # noqa: E402
+                           SHAPES as OVERLAY_SHAPES,
+                           BAR_SHAPES as OVERLAY_BAR_SHAPES)
+# Numeric overlay keys: (min, max), inclusive.
+OVERLAY_RANGES = {
+    "overlay_scale": (0.5, 4.0),
+    "overlay_opacity": (0.2, 1.0),
+    "overlay_offset_x": (-4000, 4000),
+    "overlay_offset_y": (-4000, 4000),
+    "overlay_bar_count": (3, 41),
+    "overlay_bar_width": (1.0, 16.0),
+    "overlay_bar_gap": (0.0, 16.0),
+    "overlay_bar_height": (8.0, 96.0),
+}
+OVERLAY_COLOR_KEYS = ("overlay_bg_color", "overlay_bar_color", "overlay_dot_color")
+
+
 # Text cleanup levels applied to dictation (see cleanup.py).
 CLEANUP_LEVELS = ("off", "light")
 
@@ -159,6 +178,21 @@ DEFAULTS = {
     "ask_hotkey": "",
     "ask_model": "llama3.2",
     "ask_context_limit": 5,
+    # Recording overlay look and placement (see overlay_anim.Style).
+    "overlay_scale": 1.5,
+    "overlay_position": "bottom_center",
+    "overlay_offset_x": 0,
+    "overlay_offset_y": 0,
+    "overlay_shape": "pill",
+    "overlay_bg_color": "#111318",
+    "overlay_opacity": 0.94,
+    "overlay_dot_color": "#ff4b3e",
+    "overlay_bar_color": "#edf0f5",
+    "overlay_bar_count": 13,
+    "overlay_bar_width": 3.0,
+    "overlay_bar_gap": 3.0,
+    "overlay_bar_height": 24.0,
+    "overlay_bar_shape": "rounded",
 }
 
 # Keys editable via the dashboard, with expected types.
@@ -352,6 +386,29 @@ def validate_updates(updates: dict) -> tuple[dict, list[str]]:
         if key in clean and clean[key] < 1:
             errors.append(f"{key} must be >= 1")
             del clean[key]
+    for key, (lo, hi) in OVERLAY_RANGES.items():
+        if key in clean and not lo <= clean[key] <= hi:
+            errors.append(f"{key} must be between {lo} and {hi}")
+            del clean[key]
+    for key in OVERLAY_COLOR_KEYS:
+        if key in clean:
+            c = clean[key].strip().lower()
+            if (len(c) == 7 and c[0] == "#"
+                    and all(ch in "0123456789abcdef" for ch in c[1:])):
+                clean[key] = c
+            else:
+                errors.append(f"{key} must be a #rrggbb colour")
+                del clean[key]
+    for key, allowed in (("overlay_position", OVERLAY_POSITIONS),
+                         ("overlay_shape", OVERLAY_SHAPES),
+                         ("overlay_bar_shape", OVERLAY_BAR_SHAPES)):
+        if key in clean:
+            v = clean[key].strip().lower()
+            if v in allowed:
+                clean[key] = v
+            else:
+                errors.append(f"{key} must be one of: " + ", ".join(allowed))
+                del clean[key]
     if "idle_unload_minutes" in clean and clean["idle_unload_minutes"] < 0:
         errors.append("idle_unload_minutes must be >= 0")
         del clean["idle_unload_minutes"]
