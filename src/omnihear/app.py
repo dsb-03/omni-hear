@@ -334,12 +334,146 @@ class App:
                     gc.collect()
 
     # -- typing -------------------------------------------------------
+    # type_method = "paste" (beta) is switched on by _setup_insertion();
+    # until then, and for every other method, _insert() types.
+    _paste = False
+    _PASTE_SETTLE = 0.06   # s between setting the clipboard and the paste key
+    _PASTE_RESTORE = 0.6   # s the app gets to read it before the old text returns
+
+    def _setup_insertion(self):
+        """Resolve type_method to the backend that actually runs (Wayland
+        remaps pynput/auto). "paste" sends its paste key through whatever
+        "auto" picks, which also types when the clipboard is unavailable."""
+        from . import linux_session
+        configured = self.cfg.get("type_method") or "auto"
+        self._type_method = linux_session.resolve_type_method(configured)
+        self._paste = configured == "paste"
+        if self._paste:
+            from . import clipboard
+            self._clip_lock = threading.Lock()
+            self._clip_gen = 0        # bumped per paste; stale restores skip
+            self._clip_ours = None    # our text, while its restore is pending
+            self._clip_saved = (None, None)  # user's (clipboard, PRIMARY) text
+            self._clip_sent_at = 0.0  # monotonic time of the last paste key
+            tool = clipboard.backend()
+            key = {"darwin": "Cmd+V", "win32": "Ctrl+V"}.get(
+                sys.platform, "Shift+Insert")
+            if tool:
+                print(f"omnihear: type_method=paste (beta): clipboard via "
+                      f"{tool}, {key} via {self._type_method}")
+            else:
+                print("omnihear: type_method=paste (beta): no clipboard tool "
+                      f"found, typing via {self._type_method} instead "
+                      "(see omnihear --doctor)")
+        elif (sys.platform not in ("win32", "darwin")
+                and self._type_method != configured):
+            print(f"omnihear: using type_method={self._type_method} "
+                  f"(config had {configured!r}, "
+                  f"session={linux_session.session_type()})")
+
     def _insert(self, text):
         """Put text at the cursor. Single entry point for every insertion
         (dictation, Q&A answers, paste-last), so insertion strategy
         (typing vs. clipboard paste) lives in one place."""
-        self._type_text(text)
+        if self._paste and text:
+            self._paste_text(text)
+        else:
+            self._type_text(text)
         self._last_inserted = text
+
+    def _paste_text(self, text):
+        """Clipboard paste: save the user's clipboard text, put ours there,
+        send the paste key, and put theirs back shortly after. Types instead
+        when the clipboard can't be set; if the paste key can't be sent, the
+        text stays on the clipboard for a manual paste."""
+        from . import clipboard
+        with self._clip_lock:
+            if self._clip_ours is None:
+                saved = (clipboard.get_text(), clipboard.get_text(primary=True))
+            else:
+                # Back-to-back pastes: the clipboard still holds our previous
+                # text, and its pending restore still owes the user's own.
+                saved = self._clip_saved
+                # Apps read the clipboard asynchronously after the paste key;
+                # keep the previous text there as long as a restore would.
+                wait = self._clip_sent_at + self._PASTE_RESTORE - time.monotonic()
+                if wait > 0:
+                    time.sleep(wait)
+            if not clipboard.set_text(text):
+                self._log("paste: clipboard unavailable, typing instead")
+                self._type_text(text)
+                return
+            self._clip_gen += 1
+            gen = self._clip_gen
+            self._clip_saved, self._clip_ours = saved, text
+            time.sleep(self._PASTE_SETTLE)  # let the new owner settle
+            if not self._paste_chord():
+                self._clip_saved, self._clip_ours = (None, None), None
+                key = "Cmd+V" if sys.platform == "darwin" else "Ctrl+V"
+                print("omnihear: could not send the paste key; the text is "
+                      f"on the clipboard, press {key}")
+                if self.feedback:
+                    self.feedback.notify("omnihear",
+                                         f"Copied — press {key} to paste",
+                                         urgency="normal")
+                return
+            self._clip_sent_at = time.monotonic()
+        timer = threading.Timer(self._PASTE_RESTORE, self._restore_clipboard,
+                                args=(gen,))
+        timer.daemon = True
+        timer.start()
+
+    def _restore_clipboard(self, gen):
+        """Put the user's clipboard text back after a paste, unless a newer
+        paste took over (its own restore comes later) or something else was
+        copied or selected meanwhile. Non-text content can't be restored."""
+        from . import clipboard
+        with self._clip_lock:
+            if gen != self._clip_gen or self._clip_ours is None:
+                return
+            (clip, prim), ours = self._clip_saved, self._clip_ours
+            self._clip_saved, self._clip_ours = (None, None), None
+            restored = False
+            if clip is not None and clipboard.get_text() == ours:
+                restored = clipboard.set_text(clip, primary=False)
+            if prim is not None and clipboard.get_text(primary=True) == ours:
+                restored = clipboard.set_primary(prim) or restored
+            if restored:
+                time.sleep(self._PASTE_SETTLE)  # before a next paste reads it
+
+    def _paste_chord(self) -> bool:
+        """Send the paste key through the key backend: Shift+Insert on Linux
+        (see linux_session.paste_chord), Ctrl+V on Windows, Cmd+V on macOS.
+        True if it was sent."""
+        method = self._type_method
+        if method in linux_session_methods():
+            from . import linux_session
+            return linux_session.paste_chord(method)
+        try:
+            from pynput.keyboard import Key, KeyCode
+            if sys.platform == "darwin":
+                mod, key = Key.cmd, KeyCode.from_char("v")
+            elif sys.platform == "win32":
+                # VK_V by code, so non-Latin layouts still send Ctrl+V.
+                mod, key = Key.ctrl, KeyCode.from_vk(0x56)
+            else:
+                mod, key = Key.shift, Key.insert
+            kb = self._kb()
+            with kb.pressed(mod):
+                kb.press(key)
+                kb.release(key)
+        except Exception as e:
+            self._log(f"paste key failed: {e}")
+            return False
+        return True
+
+    def _kb(self):
+        """The pynput keyboard Controller (X11 auto, Windows, macOS), made
+        on first use."""
+        if self._kb_controller is None:
+            from pynput import keyboard
+            self._kb_controller = keyboard.Controller()
+        return self._kb_controller
 
     def _type_text(self, text):
         method = self._type_method
@@ -347,10 +481,10 @@ class App:
             from . import linux_session
             linux_session.type_text(method, text)
             return
-        self._kb_controller.type(text)
+        self._kb().type(text)
 
     def _backspace(self, n):
-        """Erase the last n characters typed via _type_text."""
+        """Erase the last n characters inserted (typed or pasted)."""
         if n <= 0:
             return
         method = self._type_method
@@ -359,9 +493,10 @@ class App:
             linux_session.backspace(method, n)
             return
         from pynput.keyboard import Key
+        kb = self._kb()
         for _ in range(n):
-            self._kb_controller.press(Key.backspace)
-            self._kb_controller.release(Key.backspace)
+            kb.press(Key.backspace)
+            kb.release(Key.backspace)
 
     @staticmethod
     def _clean_audio(audio):
@@ -648,13 +783,7 @@ class App:
     def run(self):
         from . import linux_session
 
-        configured_type = self.cfg.get("type_method") or "auto"
-        self._type_method = linux_session.resolve_type_method(configured_type)
-        if (sys.platform not in ("win32", "darwin")
-                and self._type_method != configured_type):
-            print(f"omnihear: using type_method={self._type_method} "
-                  f"(config had {configured_type!r}, "
-                  f"session={linux_session.session_type()})")
+        self._setup_insertion()
 
         if linux_session.is_wayland():
             for hint in linux_session.missing_wayland_deps(

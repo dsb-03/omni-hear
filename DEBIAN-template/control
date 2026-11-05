@@ -4,7 +4,7 @@ Section: utils
 Priority: optional
 Architecture: amd64
 Depends: python3 (>= 3.11), python3-venv, python3-tk, libportaudio2, udev
-Recommends: libnotify-bin, xdotool
+Recommends: libnotify-bin, xdotool, xclip, wl-clipboard
 Suggests: ydotool, wtype
 Maintainer: dsb <you@example.com>
 Description: Push-to-talk local Whisper transcription for Linux
