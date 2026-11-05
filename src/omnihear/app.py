@@ -6,7 +6,6 @@ package (db, config, dashboard, feedback) stays importable without them.
 """
 
 import gc
-import math
 import queue
 import sys
 import threading
@@ -47,17 +46,27 @@ def parse_hotkey(name):
     return frozenset(resolve_key(p) for p in parts)
 
 
-_BAR_COLOR = "#ff4b3e"        # recording
-_BAR_COLOR_BUSY = "#ffab1a"   # transcribing
-_BAR_COUNT = 5
-_BAR_W = 4
-_BAR_GAP = 5
-_BAR_MIN_H = 6
-_BAR_MAX_H = 22
+def _pill_points(x0, y0, x1, y1, r):
+    """Polygon points for a rounded rectangle (draw with smooth=True)."""
+    return [x0 + r, y0, x1 - r, y0, x1, y0, x1, y0 + r, x1, y1 - r, x1, y1,
+            x1 - r, y1, x0 + r, y1, x0, y1, x0, y1 - r, x0, y0 + r, x0, y0]
 
 
 class RecordingOverlay:
+    """Floating pill bottom-centre of the screen (Tk: Linux X11/XWayland and
+    Windows). Listening: red dot + waveform that follows the live mic level.
+    Transcribing: amber spinner + flowing wave. Drawing comes from the shared
+    model in overlay_anim.py, which the macOS overlay uses too.
+
+    show()/show_transcribing()/hide() are called from any thread and queued
+    to the Tk thread; set_level() is called from the audio callback.
+    """
+
+    _ALPHA = 0.94
+
     def __init__(self):
+        from .overlay_anim import OverlayAnimation
+        self.anim = OverlayAnimation()
         self.root = None
         self.queue = queue.Queue()
         self.thread = threading.Thread(target=self._run, daemon=True)
@@ -68,6 +77,7 @@ class RecordingOverlay:
             import tkinter as tk
         except ImportError:
             return
+        from . import overlay_anim as oa
 
         try:
             # Under Wayland this is an XWayland window; with no X display
@@ -76,89 +86,128 @@ class RecordingOverlay:
         except tk.TclError:
             self.root = None
             return
-        self.root.overrideredirect(True)
-        self.root.attributes("-topmost", True)
+        root = self.root
+        root.overrideredirect(True)
+        root.attributes("-topmost", True)
 
-        # Small waveform badge, bottom-center of the screen (just above the
-        # taskbar) — near where the user is actually looking while typing,
-        # unlike the old top-right corner placement which sat outside their
-        # focus area.
-        w, h = 76, 44
+        # Bottom-centre, just above the taskbar/dock: near where you look
+        # while typing.
+        w, h = oa.PILL_W, oa.PILL_H
         try:
-            screen_w = self.root.winfo_screenwidth()
-            screen_h = self.root.winfo_screenheight()
-            x = (screen_w - w) // 2
-            y = screen_h - h - 90
-            self.root.geometry(f"{w}x{h}+{x}+{y}")
+            x = (root.winfo_screenwidth() - w) // 2
+            y = root.winfo_screenheight() - h - 90
+            root.geometry(f"{w}x{h}+{x}+{y}")
         except Exception:
-            self.root.geometry(f"{w}x{h}+900+900")
+            root.geometry(f"{w}x{h}+900+900")
 
-        panel_bg = "#14161c"
-        self.root.configure(bg=panel_bg)
-        try:
-            self.root.attributes("-alpha", 0.92)
-        except Exception:
-            pass
-
-        self.canvas = tk.Canvas(self.root, width=w, height=h, bg=panel_bg, highlightthickness=0)
-        self.canvas.pack(fill="both", expand=True)
-
-        cy = h / 2
-        bar_total_w = _BAR_COUNT * _BAR_W + (_BAR_COUNT - 1) * _BAR_GAP
-        start_x = (w - bar_total_w) / 2
-        self.bars = []
-        for i in range(_BAR_COUNT):
-            x = start_x + i * (_BAR_W + _BAR_GAP)
-            bar = self.canvas.create_rectangle(
-                x, cy - _BAR_MIN_H / 2, x + _BAR_W, cy + _BAR_MIN_H / 2,
-                fill=_BAR_COLOR, width=0)
-            self.bars.append((bar, x))
-
-        self.root.withdraw()
-        self.visible = False
-        self.transcribing = False
-
-        def animate():
-            if self.visible:
-                t = time.monotonic()
-                color = _BAR_COLOR_BUSY if self.transcribing else _BAR_COLOR
-                for i, (bar, x) in enumerate(self.bars):
-                    if self.transcribing:
-                        # A single pulse chases across the bars in sequence —
-                        # visually distinct from recording's organic bounce.
-                        phase = (t * 1.8 - i * 0.28) % 1.0
-                        level = max(0.0, 1 - abs(phase - 0.15) * 6)
-                    else:
-                        level = (math.sin(t * 2.2 + i * 0.9) + 1) / 2
-                    bh = _BAR_MIN_H + level * (_BAR_MAX_H - _BAR_MIN_H)
-                    self.canvas.coords(bar, x, cy - bh / 2, x + _BAR_W, cy + bh / 2)
-                    self.canvas.itemconfig(bar, fill=color)
-            if self.root:
-                self.root.after(40, animate)
-
-        def check_queue():
+        bg = oa.to_hex(oa.BG)
+        window_bg = bg
+        outline = ""
+        if sys.platform == "win32":
+            # A colour key makes everything outside the pill transparent, so
+            # Windows gets real rounded ends. Plain Tk on X11 has no window
+            # shaping; there the pill fills a small dark rectangle.
+            key = "#010203"
             try:
-                while not self.queue.empty():
-                    action = self.queue.get_nowait()
-                    if action == "show":
-                        self.transcribing = False
-                        self.visible = True
-                        self.root.deiconify()
-                    elif action == "transcribing":
-                        self.transcribing = True
-                        self.visible = True
-                        self.root.deiconify()
-                    elif action == "hide":
-                        self.visible = False
-                        self.root.withdraw()
-            except Exception:
+                root.attributes("-transparentcolor", key)
+                window_bg = key
+                outline = oa.to_hex(oa.EDGE)
+            except tk.TclError:
                 pass
-            if self.root:
-                self.root.after(50, check_queue)
+        root.configure(bg=window_bg)
 
-        self.root.after(50, check_queue)
-        self.root.after(40, animate)
-        self.root.mainloop()
+        canvas = tk.Canvas(root, width=w, height=h, bg=window_bg,
+                           highlightthickness=0, bd=0)
+        canvas.pack(fill="both", expand=True)
+        canvas.create_polygon(_pill_points(0.5, 0.5, w - 0.5, h - 0.5, h / 2),
+                              smooth=True, fill=bg, outline=outline)
+
+        cx, cy = oa.DOT_CX, h / 2
+        sr = oa.SPINNER_R
+        halo = canvas.create_oval(0, 0, 0, 0, fill=bg, outline="")
+        dot = canvas.create_oval(cx - oa.DOT_R, cy - oa.DOT_R,
+                                 cx + oa.DOT_R, cy + oa.DOT_R,
+                                 fill=oa.to_hex(oa.REC), outline="")
+        track = canvas.create_oval(cx - sr, cy - sr, cx + sr, cy + sr, width=2,
+                                   outline=oa.to_hex(oa.mix(oa.BUSY, oa.BG, 0.75)),
+                                   state="hidden")
+        spinner = canvas.create_arc(cx - sr, cy - sr, cx + sr, cy + sr,
+                                    start=90, extent=110, style="arc", width=2,
+                                    outline=oa.to_hex(oa.BUSY), state="hidden")
+        bars = [canvas.create_line(oa.bar_x(i), cy, oa.bar_x(i), cy,
+                                   width=oa.BAR_W, capstyle="round",
+                                   fill=oa.to_hex(oa.BAR))
+                for i in range(oa.N_BARS)]
+
+        def set_alpha(a):
+            try:
+                root.attributes("-alpha", a)
+                return True
+            except tk.TclError:
+                return False
+
+        def draw(fr):
+            d = fr.dot
+            if d.spinner is None:
+                r = d.halo_r
+                canvas.coords(halo, cx - r, cy - r, cx + r, cy + r)
+                canvas.itemconfigure(
+                    halo, state="normal",
+                    fill=oa.to_hex(oa.mix(d.color, oa.BG, 1.0 - d.halo_alpha)))
+                canvas.itemconfigure(dot, state="normal", fill=oa.to_hex(d.color))
+                canvas.itemconfigure(track, state="hidden")
+                canvas.itemconfigure(spinner, state="hidden")
+            else:
+                canvas.itemconfigure(halo, state="hidden")
+                canvas.itemconfigure(dot, state="hidden")
+                canvas.itemconfigure(track, state="normal")
+                # Tk angles run counter-clockwise; the model's run clockwise.
+                canvas.itemconfigure(spinner, state="normal", start=-d.spinner)
+            for i, (item, bh, col) in enumerate(zip(bars, fr.bars, fr.colors)):
+                # Round caps add BAR_W/2 at each end of the line.
+                half = max(0.25, (bh - oa.BAR_W) / 2)
+                x = oa.bar_x(i)
+                canvas.coords(item, x, cy - half, x, cy + half)
+                canvas.itemconfigure(item, fill=oa.to_hex(col))
+
+        root.withdraw()
+        st = {"visible": False, "closing": False, "alpha": 0.0}
+
+        def tick():
+            try:
+                while True:
+                    action = self.queue.get_nowait()
+                    if action in ("show", "transcribing"):
+                        self.anim.set_mode("listening" if action == "show"
+                                           else "transcribing")
+                        st["closing"] = False
+                        if not st["visible"]:
+                            st["visible"] = True
+                            st["alpha"] = 0.0
+                            set_alpha(0.0)
+                            root.deiconify()
+                            root.lift()
+                    elif action == "hide":
+                        st["closing"] = True
+            except queue.Empty:
+                pass
+            if st["visible"]:
+                draw(self.anim.frame())
+                # Quick fade in/out (~150 ms). Where -alpha is unsupported,
+                # show and hide happen immediately.
+                target = 0.0 if st["closing"] else self._ALPHA
+                st["alpha"] += (target - st["alpha"]) * 0.45
+                if abs(st["alpha"] - target) < 0.03:
+                    st["alpha"] = target
+                faded = set_alpha(st["alpha"])
+                if st["closing"] and (st["alpha"] == 0.0 or not faded):
+                    root.withdraw()
+                    st["visible"] = False
+                    self.anim.set_mode("hidden")
+            root.after(oa.FRAME_MS if st["visible"] else 50, tick)
+
+        root.after(50, tick)
+        root.mainloop()
 
     def show(self):
         if self.thread.is_alive():
@@ -171,6 +220,10 @@ class RecordingOverlay:
     def hide(self):
         if self.thread.is_alive():
             self.queue.put("hide")
+
+    def set_level(self, rms: float):
+        """Live mic level (block RMS) from the audio callback thread."""
+        self.anim.set_level(rms)
 
 
 class App:
@@ -199,8 +252,8 @@ class App:
         # Resolved at run() so Wayland can remap pynput/auto -> ydotool/wtype.
         self._type_method = cfg.get("type_method") or "auto"
         # macOS can't use the Tk overlay (Cocoa GUI must own the main thread,
-        # which the menu-bar tray takes) — use the native AppKit panel instead,
-        # which also shows a distinct "transcribing" state.
+        # which the menu-bar tray takes) — use the native AppKit panel instead.
+        # Both draw the same animation (overlay_anim.py).
         try:
             if sys.platform == "darwin":
                 from .macos_overlay import MacOverlay
@@ -209,6 +262,8 @@ class App:
                 self._overlay = RecordingOverlay()
         except Exception as e:
             print(f"omnihear: warning: overlay could not start: {e}")
+        # Feeds the live mic level to the overlay (None if it has no meter).
+        self._overlay_level = getattr(self._overlay, "set_level", None)
 
     def _log(self, msg):
         """Per-transcription chatter; printed only with --verbose."""
@@ -306,6 +361,15 @@ class App:
         if status:
             print(status)
         self._audio_q.put(indata.copy())
+        set_level = self._overlay_level
+        if set_level is not None:
+            # Block RMS drives the overlay's live waveform. Cheap (one pass
+            # over a few hundred samples) and never allowed to break capture.
+            try:
+                import numpy as np
+                set_level(float(np.sqrt(np.mean(np.square(indata)))))
+            except Exception:
+                pass
 
     def _start_recording(self, mode="dictate"):
         import sounddevice as sd
@@ -329,8 +393,8 @@ class App:
         self._log("Recording...")
 
     def _overlay_transcribing(self):
-        """Switch the indicator to the transcribing state (macOS), or just
-        hide it on overlays without one (the Tk overlay is recording-only)."""
+        """Switch the indicator to its transcribing state (spinner + flowing
+        wave), or just hide it on an overlay without one."""
         if not self._overlay:
             return
         fn = getattr(self._overlay, "show_transcribing", None)

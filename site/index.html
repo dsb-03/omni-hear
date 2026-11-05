@@ -116,11 +116,9 @@ h1 .accent { color: var(--brand); }
 .keycap { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
 kbd { font-size: 12px; padding: 5px 9px; border-radius: 7px; border: 1px solid var(--line); border-bottom-width: 3px; background: var(--card); color: var(--text); transition: transform .08s, border-bottom-width .08s, background .2s; }
 kbd.down { transform: translateY(2px); border-bottom-width: 1px; background: var(--brand-soft); border-color: var(--brand); }
-.pill { display: inline-flex; align-items: center; gap: 4px; height: 34px; padding: 0 14px; border-radius: 999px; background: #14161c; border: 1px solid rgba(255,255,255,.08); opacity: 0; transform: translateY(6px) scale(.96); transition: opacity .2s, transform .2s; }
+.pill { width: 126px; height: 38px; display: block; opacity: 0; transform: translateY(6px) scale(.96); transition: opacity .18s, transform .18s; filter: drop-shadow(0 6px 14px rgba(0,0,0,.28)); }
 .pill.on { opacity: 1; transform: none; }
-.pill b { width: 4px; height: 8px; border-radius: 2px; background: var(--rec); display: block; transition: height .08s; }
-.pill.busy b { background: var(--busy); }
-.pill small { color: #c9cfdc; font-size: 12px; margin-left: 6px; }
+.state { margin-left: 10px; font-size: 13px; color: var(--muted); min-width: 7.5em; }
 
 /* sections */
 section { padding: 84px 0; }
@@ -255,8 +253,8 @@ footer a { color: var(--muted); }
             <span id="typed"></span><span class="caret"></span>
           </div>
           <div class="demo-foot">
-            <span class="keycap">Hold <kbd id="key">Right Ctrl</kbd></span>
-            <span class="pill" id="pill"><b></b><b></b><b></b><b></b><b></b><small id="pill-label">listening</small></span>
+            <span class="keycap">Hold <kbd id="key">Right Ctrl</kbd><span class="state" id="state" aria-live="polite"></span></span>
+            <canvas class="pill" id="pill" width="126" height="38" aria-hidden="true"></canvas>
           </div>
         </div>
       </div>
@@ -468,46 +466,132 @@ omnihear --doctor</pre></div>
     });
   });
 
-  // hero demo: hold key -> waveform -> transcribing -> text types in
+  // Hero demo. The pill is a port of src/omnihear/overlay_anim.py, the
+  // model the real overlay draws: listening = red dot + waveform following
+  // the (simulated) mic level; transcribing = amber spinner + flowing wave.
   var lines = [
     "Let's move the design review to Thursday at 3, and loop in Priya for the onboarding flow.",
     "Quick update: the Wayland build is green, shipping it this afternoon.",
     "Can you send me the latest numbers before the call? Thanks!"
   ];
   var typed = document.getElementById('typed'), key = document.getElementById('key'),
-      pill = document.getElementById('pill'), label = document.getElementById('pill-label'),
-      bars = pill.querySelectorAll('b');
+      pill = document.getElementById('pill'), state = document.getElementById('state');
   var reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
-  if (reduce) { typed.textContent = lines[0]; return; }
-  var i = 0, wave = null;
-  function animateBars(busy) {
-    clearInterval(wave);
-    var t = 0;
-    wave = setInterval(function () {
-      t += 0.12;
-      bars.forEach(function (b, n) {
-        var level = busy ? Math.max(0, 1 - Math.abs(((t * 1.8 - n * 0.28) % 1) - 0.15) * 6)
-                         : (Math.sin(t * 4 + n * 1.3) + 1) / 2 * (0.6 + Math.random() * 0.4);
-        b.style.height = (6 + level * 16) + 'px';
-      });
-    }, 45);
+  if (reduce || !pill.getContext) { typed.textContent = lines[0]; return; }
+
+  var PW = 126, PH = 38, DOT_CX = 19, DOT_R = 4.5, SPIN_R = 6, N = 13,
+      BW = 3, GAP = 3, BMIN = 3, BMAX = 24, X0 = 36, FRAME = 1 / 30;
+  var BG = [17, 19, 24], REC = [255, 75, 62], BUSY = [255, 176, 32], BAR = [237, 240, 245];
+  var dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+  pill.width = PW * dpr; pill.height = PH * dpr;
+  var ctx = pill.getContext('2d');
+  ctx.scale(dpr, dpr);
+
+  function mix(a, b, t) { t = Math.min(1, Math.max(0, t)); return [0, 1, 2].map(function (k) { return a[k] + (b[k] - a[k]) * t; }); }
+  function css(c, a) { return 'rgba(' + Math.round(c[0]) + ',' + Math.round(c[1]) + ',' + Math.round(c[2]) + ',' + (a == null ? 1 : a) + ')'; }
+  function level(rms) { if (rms <= 1e-7) return 0; return Math.min(1, Math.max(0, (20 * Math.log10(rms) + 50) / 32)); }
+
+  var m = { mode: 'hidden', since: 0, env: 0, hist: [0, 0, 0, 0, 0, 0, 0], h: new Array(N).fill(0) };
+  function setMode(mode, now) {
+    if (mode === 'listening') { m.env = 0; m.hist = [0, 0, 0, 0, 0, 0, 0]; }
+    m.mode = mode; m.since = now;
   }
+  function speech(t) {  // syllable-like envelope at normal speaking level
+    var word = Math.max(0, Math.sin(t * 7)) * (0.6 + 0.4 * Math.sin(t * 1.7));
+    return 0.002 + 0.07 * word + Math.random() * 0.004;
+  }
+  function frame(now) {
+    var t = now - m.since, c = (N - 1) / 2, targets = [], colors = [], dot, ease;
+    if (m.mode === 'transcribing') {
+      var sweep = (t * 0.9) % 1.6 - 0.3;
+      for (var i = 0; i < N; i++) {
+        var wave = 0.5 + 0.5 * Math.sin(t * 5 - i * 0.62);
+        var glow = Math.exp(-Math.pow((i / (N - 1) - sweep) / 0.16, 2));
+        targets.push(0.14 + 0.22 * wave + 0.44 * glow);
+        colors.push(mix(BUSY, BG, 0.55 * (1 - glow)));
+      }
+      dot = { color: BUSY, spinner: (t * 400) % 360 };
+      ease = 0.25;
+    } else {
+      var lv = level(speech(now));
+      m.env = lv > m.env ? lv : m.env * 0.86 + lv * 0.14;
+      m.hist.unshift(m.env); m.hist.length = 7;
+      for (var j = 0; j < N; j++) {
+        var d = Math.abs(j - c);
+        var v = m.hist[d] * (1 - 0.085 * d) * (0.74 + 0.26 * Math.sin(now * 11 + j * 1.9));
+        var idle = 0.06 + 0.05 * (0.5 + 0.5 * Math.sin(now * 3.2 - d * 0.75));
+        targets.push(Math.max(idle, v));
+        colors.push(BAR);
+      }
+      var phase = (t % 1.3) / 1.3;
+      dot = { color: REC, spinner: null, haloR: DOT_R + 1 + phase * 6.5, haloA: 0.45 * (1 - phase) };
+      ease = 0.5;
+    }
+    for (var k = 0; k < N; k++) m.h[k] += (targets[k] - m.h[k]) * ease;
+    return { bars: m.h.map(function (x) { return BMIN + x * (BMAX - BMIN); }), colors: colors, dot: dot };
+  }
+  function draw(fr) {
+    var cy = PH / 2;
+    ctx.clearRect(0, 0, PW, PH);
+    ctx.fillStyle = css(BG, 0.96);
+    ctx.beginPath();
+    ctx.arc(cy, cy, cy - 0.5, Math.PI / 2, Math.PI * 1.5);
+    ctx.arc(PW - cy, cy, cy - 0.5, Math.PI * 1.5, Math.PI / 2);
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.10)'; ctx.lineWidth = 1; ctx.stroke();
+    var d = fr.dot;
+    if (d.spinner == null) {
+      ctx.fillStyle = css(d.color, d.haloA);
+      ctx.beginPath(); ctx.arc(DOT_CX, cy, d.haloR, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = css(d.color);
+      ctx.beginPath(); ctx.arc(DOT_CX, cy, DOT_R, 0, Math.PI * 2); ctx.fill();
+    } else {
+      ctx.lineWidth = 2; ctx.lineCap = 'round';
+      ctx.strokeStyle = css(d.color, 0.25);
+      ctx.beginPath(); ctx.arc(DOT_CX, cy, SPIN_R, 0, Math.PI * 2); ctx.stroke();
+      var a0 = d.spinner * Math.PI / 180;  // canvas angles already run clockwise
+      ctx.strokeStyle = css(d.color);
+      ctx.beginPath(); ctx.arc(DOT_CX, cy, SPIN_R, a0, a0 + 110 * Math.PI / 180); ctx.stroke();
+    }
+    ctx.lineWidth = BW; ctx.lineCap = 'round';
+    fr.bars.forEach(function (bh, i) {
+      var x = X0 + i * (BW + GAP) + BW / 2, half = Math.max(0.25, (bh - BW) / 2);
+      ctx.strokeStyle = css(fr.colors[i]);
+      ctx.beginPath(); ctx.moveTo(x, cy - half); ctx.lineTo(x, cy + half); ctx.stroke();
+    });
+  }
+
+  var last = 0;
+  function loop(ms) {
+    if (m.mode === 'hidden') return;
+    var now = ms / 1000;
+    if (now - last >= FRAME) { last = now; draw(frame(now)); }
+    requestAnimationFrame(loop);
+  }
+  function go(mode) {
+    var now = performance.now() / 1000, wasHidden = m.mode === 'hidden';
+    setMode(mode, now);
+    if (mode !== 'hidden' && wasHidden) requestAnimationFrame(loop);
+  }
+
+  var n = 0;
   function cycle() {
-    var text = lines[i++ % lines.length];
+    var text = lines[n++ % lines.length];
     typed.textContent = '';
-    key.classList.add('down'); pill.classList.add('on'); pill.classList.remove('busy');
-    label.textContent = 'listening'; animateBars(false);
+    key.classList.add('down'); pill.classList.add('on');
+    state.textContent = 'listening'; go('listening');
     setTimeout(function () {
-      key.classList.remove('down'); pill.classList.add('busy'); label.textContent = 'transcribing'; animateBars(true);
+      key.classList.remove('down'); state.textContent = 'transcribing'; go('transcribing');
       setTimeout(function () {
-        pill.classList.remove('on'); clearInterval(wave);
-        var n = 0;
+        pill.classList.remove('on'); state.textContent = '';
+        setTimeout(function () { go('hidden'); }, 200);
+        var c = 0;
         var tick = setInterval(function () {
-          n += 2; typed.textContent = text.slice(0, n);
-          if (n >= text.length) { clearInterval(tick); setTimeout(cycle, 2600); }
+          c += 2; typed.textContent = text.slice(0, c);
+          if (c >= text.length) { clearInterval(tick); setTimeout(cycle, 2600); }
         }, 22);
-      }, 700);
-    }, 2200);
+      }, 900);
+    }, 2400);
   }
   setTimeout(cycle, 600);
 })();

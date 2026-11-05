@@ -28,9 +28,17 @@ omnihear --doctor                          # check permissions/deps, print fixes
 omnihear --help                            # full CLI options
 ```
 
+While you hold the hotkey, a small pill at the bottom of the screen shows a
+red dot and a waveform that follows your voice. It switches to an amber
+spinner while transcribing, and turns grey if the microphone sends no
+signal.
+
 The terminal stays quiet during normal use (transcriptions are visible in
 the web dashboard); pass `--verbose` (or set `verbose = true`) to print
 per-transcription output for debugging.
+
+What's coming next: [FEATURES.md](FEATURES.md) (checklist) and
+[ROADMAP.md](ROADMAP.md) (plan and rollout).
 
 ## Web dashboard
 

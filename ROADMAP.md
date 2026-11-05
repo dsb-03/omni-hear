@@ -1,6 +1,8 @@
 # omnihear roadmap
 
-What's next for omnihear, and how each piece ships. The reference point is
+What's next for omnihear, and how each piece ships. For the plain checklist
+of features and improvements, see [FEATURES.md](FEATURES.md). The reference
+point is
 **Wispr Flow**, the most polished push-to-talk dictation app right now. The
 plan is to match how it *feels* to use while keeping omnihear's rules:
 everything runs locally, it works offline, new Python code is stdlib-only,
@@ -13,7 +15,7 @@ and Linux (X11 and Wayland), Windows and macOS all keep working.
 | Hold-to-talk into any app | Fn key | Any key/combo | Done |
 | Hands-free mode (lock recording) | Double-tap / Fn+Space | No | Phase 1 |
 | Insertion | Clipboard paste, restores clipboard | Simulated typing | Phase 1: `paste` method |
-| Live "Flow bar" with mic level | Yes | Animated badge, not the real level | Phase 1 |
+| Live "Flow bar" with mic level | Yes | Yes: live waveform, spinner while transcribing, no-signal warning | Done (1.9.0) |
 | Filler-word removal, self-corrections ("2pm, actually 3") | AI auto-edit (cloud) | Spoken punctuation, "scratch that" | Phase 1 (rules), Phase 3 (local LLM) |
 | Personal dictionary | Auto-learned + manual | Common Brain (auto, beta) | Phase 2: manual UI |
 | Snippets (voice shortcuts) | Yes | No | Phase 2 |
@@ -55,6 +57,14 @@ session at all, so Wayland is now the main Linux path.
   up, held keys are released when a device disappears, omnihear's own virtual
   keyboard is ignored (otherwise typing "Hi" presses Shift and can fire a
   `shift_l` hotkey), and punctuation hotkeys work on Wayland.
+- **New overlay on every platform**, drawn from one shared model
+  (`overlay_anim.py`). Listening shows a red dot with a pulsing halo and a
+  waveform driven by the live mic level (RMS from the audio callback),
+  rippling out from the centre. Transcribing shows an amber spinner and a
+  flowing wave with a sweeping highlight. It turns grey if no signal arrives
+  in the first 1.5 s (muted or wrong mic), and fades in and out. Tk on
+  Linux and Windows (real rounded pill via a colour key on Windows); AppKit
+  on macOS.
 - **`omnihear --doctor`**: checks the session, input-group access (including
   "added to the group but not logged out yet"), uinput, typer, keyboard
   layout, microphone, model deps and the overlay, and prints the exact fix
@@ -105,22 +115,19 @@ Theme: faster, more trustworthy insertion and a first run that just works.
      the clipboard and notify "copied — press Ctrl+V".
 2. **Hands-free mode.** Double-tap the hotkey to lock recording, tap again to
    stop. Uses a 350 ms window in both pynput and evdev monitors and a
-   `max_recording_seconds` safety cap. The overlay shows a lock state.
-3. **Real mic level in the overlay.** Feed RMS from `_audio_callback` to the
-   Tk, AppKit and Windows overlays instead of the sine animation. A "no
-   input" state after 1.5 s of digital silence catches muted or wrong mics,
-   the most common Flow-style support issue.
-4. **Rule-based cleanup** (`cleanup = "off" | "light"`, stdlib in
+   `max_recording_seconds` safety cap. The overlay adds a lock state to
+   the 1.9.0 pill.
+3. **Rule-based cleanup** (`cleanup = "off" | "light"`, stdlib in
    `commands.py`): drop fillers (um, uh, er, "you know" at clause edges),
    collapse stutters ("the the"), handle inline backtracking ("at 2, actually
    3" → "at 3", "no wait" / "I mean" patterns), and turn spoken lists into
    bullets when there's "first/second/third". Each rule ships with a
    self-check case like the existing ones.
-5. **Onboarding wizard in the dashboard.** On first run, `#/welcome` shows the
+4. **Onboarding wizard in the dashboard.** On first run, `#/welcome` shows the
    `--doctor` results (`/api/doctor`) with copy-to-clipboard fixes, a mic test
    with a live meter, a "press your hotkey" test, and a practice text box.
    Linux shows the `input` group step only when it's actually needed.
-6. **"Paste last transcript"** dashboard button and optional hotkey,
+5. **"Paste last transcript"** dashboard button and optional hotkey,
    Flow's recovery path for when focus was in the wrong place.
 
 **Rollout:** each item ships behind its own config key. The dashboard shows
