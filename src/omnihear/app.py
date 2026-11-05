@@ -545,12 +545,12 @@ class App:
         if prompt_parts:
             kwargs["initial_prompt"] = " ".join(prompt_parts)[:400]
         try:
-            segments, _ = model.transcribe(audio, **kwargs)
+            segments, info = model.transcribe(audio, **kwargs)
         except TypeError:
             # older faster-whisper without hotwords support
             self._hotwords_supported = False
             kwargs.pop("hotwords", None)
-            segments, _ = model.transcribe(audio, **kwargs)
+            segments, info = model.transcribe(audio, **kwargs)
         segments = list(segments)
         text = "".join(seg.text for seg in segments).strip()
 
@@ -576,6 +576,11 @@ class App:
             if resolved_cmd:
                 text = resolved_cmd  # bypass brain/punctuation -- it's a command, not prose
             else:
+                if text and self.cfg.get("cleanup", "off") != "off":
+                    # fillers/stutters/self-corrections; "" if only "um"
+                    from . import cleanup
+                    text = cleanup.clean(text, self.cfg["cleanup"],
+                                         getattr(info, "language", None))
                 if text and self._brain_active() and self.cfg.get("brain_autocorrect"):
                     try:
                         text = self.brain.apply(text)
