@@ -1229,7 +1229,7 @@ kbd.keycap {
         <div class="wiz-success" id="wiz3-success" hidden>
           <div class="succ-icon"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></div>
           <div style="flex:1;min-width:0;">
-            <div class="succ-title">It works &mdash; you&rsquo;re ready to dictate!</div>
+            <div class="succ-title" id="wiz3-title">It works &mdash; you&rsquo;re ready to dictate!</div>
             <div class="succ-text" id="wiz3-heard"></div>
             <div class="wiz-note warn" id="wiz3-nottyped" hidden>omnihear heard you, but the text didn&rsquo;t land in the box. Keep the box focused while you speak, or check the typing rows in <a class="inline-link" href="#/welcome?step=1">Step 1</a>.</div>
             <button class="link-btn" id="wiz3-again" type="button">Try again</button>
@@ -2382,8 +2382,16 @@ function wizSuccess3(row) {
   // Typing happens before the history insert, so an empty box by now means
   // the text went somewhere else.
   if (row && !ta.value.trim())
-    wiz.helpTimer = setTimeout(() => { if (!ta.value.trim()) $('#wiz3-nottyped').hidden = false; }, 2000);
+    wiz.helpTimer = setTimeout(() => {
+      if (ta.value.trim()) return;
+      // Transcription works but insertion didn't reach the box: don't claim
+      // full success next to the "didn't land" hint.
+      $('#wiz3-title').textContent = WIZ3_TITLE_PARTIAL;
+      $('#wiz3-nottyped').hidden = false;
+    }, 2000);
 }
+const WIZ3_TITLE_OK = 'It works — you’re ready to dictate!';
+const WIZ3_TITLE_PARTIAL = 'Almost there: omnihear heard you';
 function wizPaint3Done() {
   wizState3('ok', `${ICON.check}Dictation works!`);
   $('#wiz3-success').hidden = false;
@@ -2417,7 +2425,7 @@ $('#wiz-skip').addEventListener('click', wizFinish);
 $('#wiz-recheck').addEventListener('click', wizStep1);
 $('#wiz-practice').addEventListener('input', () => {
   const has = !!$('#wiz-practice').value.trim();
-  if (has) $('#wiz3-nottyped').hidden = true;
+  if (has) { $('#wiz3-nottyped').hidden = true; $('#wiz3-title').textContent = WIZ3_TITLE_OK; }
   if (has && wiz.step === 3 && !wiz.done3) wizSuccess3(null);
 });
 $('#wiz3-again').addEventListener('click', () => {
@@ -2426,6 +2434,7 @@ $('#wiz3-again').addEventListener('click', () => {
   $('#wiz3-heard').textContent = '';
   $('#wiz3-success').hidden = true;
   $('#wiz3-nottyped').hidden = true;
+  $('#wiz3-title').textContent = WIZ3_TITLE_OK;
   wizShow(3);
 });
 // Step 2 has nothing to type into, but omnihear still "types" the transcript
