@@ -35,6 +35,27 @@ def _gnome_layouts() -> list[str]:
     return layouts
 
 
+def _clipboard_row() -> tuple[str, str, str]:
+    """type_method = "paste": the clipboard tool it uses, or what to install."""
+    from . import clipboard
+    label, tool = "clipboard (paste)", clipboard.backend()
+    if sys.platform in ("win32", "darwin"):
+        return (OK, label, tool) if tool else (FAIL, label, "pbcopy not found")
+    from . import linux_session
+    wayland, gnome = linux_session.is_wayland(), linux_session.is_gnome()
+    # GNOME: X11 tools through XWayland (Mutter has no data-control, so
+    # wl-copy has to steal focus); KDE/wlroots: wl-clipboard.
+    x11_tools = not wayland or (gnome and bool(os.environ.get("DISPLAY")))
+    if tool is None:
+        pkg = "xclip" if x11_tools else "wl-clipboard"
+        return (FAIL, label, f"no clipboard tool — `sudo apt install {pkg}` "
+                "(dictation is typed until then)")
+    if wayland and gnome and x11_tools and tool == "wl-copy/wl-paste":
+        return (WARN, label, f"{tool} briefly steals focus on GNOME — "
+                "`sudo apt install xclip`")
+    return (OK, label, tool)
+
+
 def checks(cfg: dict) -> list[tuple[str, str, str]]:
     """(status, label, detail) rows."""
     rows: list[tuple[str, str, str]] = []
@@ -57,6 +78,9 @@ def checks(cfg: dict) -> list[tuple[str, str, str]]:
             else "no input devices — check Settings > Sound > Input")
     except Exception as e:  # PortAudio missing, no audio server, ...
         add(FAIL, "microphone", f"could not query audio devices: {e}")
+
+    if (cfg.get("type_method") or "auto") == "paste":
+        rows.append(_clipboard_row())
 
     if sys.platform in ("win32", "darwin"):
         add(OK, "platform", sys.platform)

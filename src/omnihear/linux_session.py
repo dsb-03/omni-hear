@@ -80,11 +80,15 @@ def resolve_type_method(configured: str) -> str:
 
     'auto' picks a working backend for the session. On Wayland, bare
     'pynput' is remapped because pynput cannot inject into Wayland-native
-    clients (it talks to X11 / XWayland only).
+    clients (it talks to X11 / XWayland only). 'paste' resolves like
+    'auto': that backend sends its paste shortcut (and types when the
+    clipboard is unavailable).
     """
     method = (configured or "auto").strip().lower()
     if sys.platform in ("win32", "darwin"):
         return "pynput"
+    if method == "paste":
+        method = "auto"
     if method == "auto" or (is_wayland() and method in ("pynput", "xdotool")):
         if is_wayland():
             avail = wayland_type_available()
@@ -132,6 +136,35 @@ def backspace(method: str, n: int) -> None:
             subprocess.run(["wtype", "-k", "backspace"], check=False)
     else:
         raise ValueError(f"unknown type method for Linux inject: {method}")
+
+
+def paste_chord(method: str) -> bool:
+    """Press Shift+Insert, the paste key for type_method = "paste": GTK, Qt,
+    Chromium and Firefox paste CLIPBOARD on it, terminals PRIMARY
+    (clipboard.set_text sets both). True if it was sent."""
+    if method == "uinput":
+        from . import uinput_keyboard
+        try:
+            uinput_keyboard.default_keyboard().paste_chord()
+        except OSError:
+            return False
+        return True
+    if method == "xdotool":
+        argv = ["xdotool", "key", "--clearmodifiers", "shift+Insert"]
+    elif method == "ydotool":
+        # KEY_LEFTSHIFT = 42, KEY_INSERT = 110; :1 press, :0 release.
+        argv = ["ydotool", "key", "42:1", "110:1", "110:0", "42:0"]
+    elif method == "wtype":
+        # wtype uploads a fresh keymap each run; XWayland apps can drop a
+        # key press sent before they've applied it, so pause first.
+        argv = ["wtype", "-M", "shift", "-s", "50", "-k", "Insert",
+                "-m", "shift"]
+    else:
+        raise ValueError(f"unknown type method for Linux inject: {method}")
+    try:
+        return subprocess.run(argv, check=False, timeout=5).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
 
 
 def in_input_group_pending() -> bool:

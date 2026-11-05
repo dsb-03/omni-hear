@@ -45,6 +45,7 @@ SYN_REPORT = 0
 KEY_LEFTCTRL = 29
 KEY_BACKSPACE = 14
 KEY_U = 22
+KEY_INSERT = 110  # Shift+Insert: the paste key for type_method = "paste"
 _HEX_CODES = {c: US_KEYMAP[c][0] for c in "0123456789abcdef"}
 
 # Typographic characters Whisper sometimes emits, mapped to ASCII so they
@@ -93,7 +94,8 @@ class VirtualKeyboard:
             fcntl.ioctl(fd, UI_SET_EVBIT, EV_KEY)
             fcntl.ioctl(fd, UI_SET_EVBIT, EV_SYN)
             codes = {code for code, _ in US_KEYMAP.values()}
-            codes |= {KEY_LEFTSHIFT, KEY_LEFTCTRL, KEY_BACKSPACE, KEY_U}
+            codes |= {KEY_LEFTSHIFT, KEY_LEFTCTRL, KEY_BACKSPACE, KEY_U,
+                      KEY_INSERT}
             for code in sorted(codes):
                 fcntl.ioctl(fd, UI_SET_KEYBIT, code)
             setup = struct.pack(_SETUP_FMT, BUS_USB, 0x1209, 0x0A11, 1,
@@ -166,6 +168,13 @@ class VirtualKeyboard:
             fd = self._ensure()
             for _ in range(n):
                 self._tap(fd, KEY_BACKSPACE)
+
+    def paste_chord(self) -> None:
+        """Shift+Insert (type_method = "paste"). Layout-independent, unlike
+        typing through US_KEYMAP."""
+        with self._lock:
+            fd = self._ensure()
+            self._tap(fd, KEY_INSERT, KEY_LEFTSHIFT)
 
 
 _default: VirtualKeyboard | None = None
