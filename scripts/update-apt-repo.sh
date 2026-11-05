@@ -43,4 +43,7 @@ gpg --batch --yes $GPG_OPTS --default-key "$GPG_KEY_ID" --clearsign -o "$DIST_DI
 echo "==> Exporting public key to docs/pubkey.gpg"
 gpg --armor --export "$GPG_KEY_ID" > "$DOCS_DIR/pubkey.gpg"
 
+echo "==> Syncing landing page"
+"$REPO_ROOT/scripts/sync-site.sh"
+
 echo "==> Done. Commit and push the docs/ folder to publish the update."

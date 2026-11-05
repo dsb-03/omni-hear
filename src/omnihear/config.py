@@ -32,6 +32,30 @@ KEY_DISPLAY_NAMES = {
 }
 
 
+# Text-injection backends. "uinput" is omnihear's built-in Wayland typer
+# (/dev/uinput, any compositor); xdotool is X11; ydotool/wtype are external
+# Wayland tools. Linux-only ones are rejected on Windows/macOS.
+LINUX_TYPE_METHODS = ("uinput", "xdotool", "ydotool", "wtype")
+# "paste" (beta, all platforms): put the text on the clipboard and send the
+# paste shortcut through the auto-selected key backend, then restore the
+# previous clipboard. Falls back to typing if the clipboard is unavailable.
+TYPE_METHODS = ("auto", "pynput", "paste") + LINUX_TYPE_METHODS
+
+# System paste shortcuts. Binding paste_last_hotkey to one would fire on
+# every ordinary paste (and on omnihear's own pastes in paste mode).
+PASTE_SHORTCUTS = (frozenset({"ctrl_l", "v"}), frozenset({"ctrl_r", "v"}),
+                   frozenset({"cmd_l", "v"}), frozenset({"cmd_r", "v"}))
+
+
+def is_paste_shortcut(name: str) -> bool:
+    parts = frozenset(p for p in str(name).strip().lower().split("+") if p)
+    return parts in PASTE_SHORTCUTS
+
+
+# Text cleanup levels applied to dictation (see cleanup.py).
+CLEANUP_LEVELS = ("off", "light")
+
+
 def hotkey_display(name: str) -> str:
     """Human-readable form of a canonical hotkey string, e.g.
     'ctrl_l+space' -> 'Ctrl Left + Space'."""
@@ -101,6 +125,9 @@ DEFAULTS = {
     "device": "cpu",
     "compute_type": "int8",
     "hotkey": "ctrl_r",
+    "hands_free": False,
+    "max_recording_seconds": 300,
+    "paste_last_hotkey": "",
     "sample_rate": 16000,
     "type_method": "auto",
     "language": "en",
@@ -125,6 +152,7 @@ DEFAULTS = {
     "brain_min_count": 2,
     "analytics": False,
     "voice_commands": False,
+    "cleanup": "off",
     "terminal_commands": False,
     "rag_context": False,
     "rag_context_limit": 3,
@@ -228,11 +256,11 @@ def validate_updates(updates: dict) -> tuple[dict, list[str]]:
     if "device" in clean and clean["device"] not in ("cpu", "cuda"):
         errors.append("device must be cpu or cuda")
         del clean["device"]
-    _TYPE_METHODS = ("auto", "pynput", "xdotool", "ydotool", "wtype")
+    _TYPE_METHODS = TYPE_METHODS
     if "type_method" in clean and clean["type_method"] not in _TYPE_METHODS:
         errors.append("type_method must be one of: " + ", ".join(_TYPE_METHODS))
         del clean["type_method"]
-    if ("type_method" in clean and clean["type_method"] in ("xdotool", "ydotool", "wtype")
+    if ("type_method" in clean and clean["type_method"] in LINUX_TYPE_METHODS
             and sys.platform in ("win32", "darwin")):
         errors.append(f"type_method '{clean['type_method']}' is only supported on Linux")
         del clean["type_method"]
@@ -242,7 +270,7 @@ def validate_updates(updates: dict) -> tuple[dict, list[str]]:
             from . import linux_session
             if linux_session.is_wayland():
                 errors.append("type_method 'xdotool' requires an X11 session "
-                              "(use auto, ydotool, or wtype on Wayland)")
+                              "(use auto, uinput, ydotool, or wtype on Wayland)")
                 del clean["type_method"]
         except Exception:
             pass
@@ -270,6 +298,33 @@ def validate_updates(updates: dict) -> tuple[dict, list[str]]:
             errors.append("hotkey must be known key names or single characters, "
                           "joined with '+' for combos")
             del clean["hotkey"]
+    if "paste_last_hotkey" in clean:
+        v = clean["paste_last_hotkey"].strip()
+        if not v:
+            clean["paste_last_hotkey"] = ""  # empty disables it
+        else:
+            hk = validate_hotkey(v)
+            if hk and is_paste_shortcut(hk):
+                errors.append("paste_last_hotkey can't be the system paste "
+                              "shortcut (it would fire on every paste)")
+                del clean["paste_last_hotkey"]
+            elif hk:
+                clean["paste_last_hotkey"] = hk
+            else:
+                errors.append("paste_last_hotkey must be known key names or "
+                              "single characters, joined with '+' for combos")
+                del clean["paste_last_hotkey"]
+    if "cleanup" in clean:
+        lvl = clean["cleanup"].strip().lower()
+        if lvl in CLEANUP_LEVELS:
+            clean["cleanup"] = lvl
+        else:
+            errors.append("cleanup must be one of: " + ", ".join(CLEANUP_LEVELS))
+            del clean["cleanup"]
+    if ("max_recording_seconds" in clean
+            and not 10 <= clean["max_recording_seconds"] <= 3600):
+        errors.append("max_recording_seconds must be between 10 and 3600")
+        del clean["max_recording_seconds"]
     if "ask_hotkey" in clean:
         v = clean["ask_hotkey"].strip()
         if not v:
