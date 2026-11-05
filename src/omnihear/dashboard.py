@@ -18,10 +18,6 @@ PAGE = """<!DOCTYPE html>
 <title>Omnihear Dashboard</title>
 <!-- Favicon: Inline SVG Logo -->
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3csvg width='200' height='200' viewBox='0 0 200 200' fill='none' xmlns='http://www.w3.org/2000/svg'%3e%3cdefs%3e%3clinearGradient id='waveGradient' x1='40' y1='100' x2='160' y2='100' gradientUnits='userSpaceOnUse'%3e%3cstop offset='0%25' stop-color='%233498db'/%3e%3cstop offset='100%25' stop-color='%232ecc71'/%3e%3c/linearGradient%3e%3c/defs%3e%3crect x='20' y='20' width='160' height='160' rx='25' fill='%232c3e50'/%3e%3cpath d='M50 100 C 60 80, 70 80, 80 100 C 90 120, 100 120, 110 100 C 120 70, 130 70, 140 100' stroke='url(%23waveGradient)' stroke-width='12' stroke-linecap='round' fill='none'/%3e%3ccircle cx='50' cy='100' r='6' fill='%233498db'/%3e%3ccircle cx='150' cy='100' r='6' fill='%232ecc71'/%3e%3c/svg%3e">
-<!-- Google Fonts -->
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
 :root {
   --surface: #f1f5f9;
@@ -68,7 +64,7 @@ PAGE = """<!DOCTYPE html>
 body {
   background: var(--surface);
   color: var(--text);
-  font-family: 'Inter', sans-serif;
+  font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   line-height: 1.6;
   min-height: 100vh;
   transition: background 0.3s ease, color 0.3s ease;
@@ -99,7 +95,7 @@ header {
   gap: 12px;
 }
 .brand-name {
-  font-family: 'Outfit', sans-serif;
+  font-family: 'Outfit', 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   font-size: 22px;
   font-weight: 800;
   background: var(--accent-gradient);
@@ -256,7 +252,7 @@ nav a.active {
 }
 
 h2 {
-  font-family: 'Outfit', sans-serif;
+  font-family: 'Outfit', 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   font-size: 18px;
   font-weight: 700;
   margin: 28px 0 12px;
@@ -288,7 +284,7 @@ h2 {
 .tile .v {
   font-size: 24px;
   font-weight: 700;
-  font-family: 'Outfit', sans-serif;
+  font-family: 'Outfit', 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   color: var(--text);
 }
 .tile .l {
@@ -326,7 +322,7 @@ h2 {
   cursor: pointer;
 }
 .axis {
-  font-family: 'Inter', sans-serif;
+  font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   font-size: 11px;
   fill: var(--text-muted);
 }
