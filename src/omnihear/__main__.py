@@ -128,8 +128,10 @@ def effective_config(args, file_cfg: dict | None = None) -> dict:
     # file-configured values instead of resetting to DEFAULTS.
     cfg = dict(file_cfg or config_mod.DEFAULTS)
     for key in cfg:
-        val = getattr(args, key, None)
-        if val is None:
+        if not hasattr(args, key):
+            continue   # no CLI flag: keep the config file's value
+        val = getattr(args, key)
+        if val is None:  # e.g. --input-device defaults to None for ""
             val = "" if isinstance(cfg[key], str) else cfg[key]
         cfg[key] = val
     return cfg
