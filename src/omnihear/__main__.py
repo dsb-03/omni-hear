@@ -24,13 +24,33 @@ def build_parser(cfg: dict) -> argparse.ArgumentParser:
                    help=f"Push-to-talk key. One of: {', '.join(SPECIAL_KEY_NAMES)} "
                         "or a single character (e.g. 'q'). Combos join parts "
                         "with '+', e.g. 'ctrl_l+space'.")
+    p.add_argument("--hands-free", dest="hands_free", action="store_true",
+                   default=cfg["hands_free"],
+                   help="Hands-free mode (beta): double-tap the hotkey to keep "
+                        "recording without holding it; tap again to stop.")
+    p.add_argument("--no-hands-free", dest="hands_free", action="store_false",
+                   help="Disable hands-free mode.")
+    p.add_argument("--max-recording-seconds", type=int,
+                   default=cfg["max_recording_seconds"],
+                   help="Safety cap: stop and transcribe after this many "
+                        "seconds of recording (10-3600).")
+    p.add_argument("--paste-last-hotkey", default=cfg["paste_last_hotkey"],
+                   help="Optional key/combo that re-inserts the last "
+                        "transcript at the cursor (e.g. 'ctrl_l+shift_l+v'). "
+                        "Empty disables it.")
+    p.add_argument("--cleanup", default=cfg["cleanup"],
+                   choices=list(config_mod.CLEANUP_LEVELS),
+                   help="Clean up dictation before typing (beta): 'light' "
+                        "removes filler words (um, uh), stutters and "
+                        "spoken self-corrections.")
     p.add_argument("--sample-rate", type=int, default=cfg["sample_rate"],
                    help="Audio sample rate in Hz.")
     p.add_argument("--type-method", default=cfg["type_method"],
-                   choices=["auto", "pynput", "xdotool", "ydotool", "wtype"],
+                   choices=list(config_mod.TYPE_METHODS),
                    help="How to inject transcribed text into the focused field. "
-                        "'auto' picks pynput on X11/Windows/macOS, and "
-                        "ydotool/wtype on Wayland.")
+                        "'auto' picks pynput on X11/Windows/macOS; on Wayland "
+                        "the built-in uinput typer, else ydotool/wtype. "
+                        "'paste' (beta) pastes via the clipboard and restores it.")
     p.add_argument("--language", default=cfg["language"],
                    help="Language code for transcription.")
     p.add_argument("--beam-size", type=int, default=cfg["beam_size"],
@@ -93,6 +113,10 @@ def build_parser(cfg: dict) -> argparse.ArgumentParser:
                    default=cfg["verbose"],
                    help="Print per-transcription output to the terminal "
                         "(recording, queued audio, transcribed text).")
+    p.add_argument("--doctor", action="store_true",
+                   help="Check this machine's setup (session, hotkey and "
+                        "typing permissions, audio, model deps), print fixes, "
+                        "and exit.")
     p.add_argument("--write-config", action="store_true",
                    help="Write the current effective settings to "
                         f"{config_mod.config_path()} and exit.")
@@ -120,6 +144,10 @@ def main():
         path = config_mod.save_config(cfg)
         print(f"Wrote {path}")
         sys.exit(0)
+
+    if args.doctor:
+        from . import doctor
+        sys.exit(doctor.main(cfg))
 
     if args.list_devices:
         from .app import list_devices
@@ -149,7 +177,7 @@ def main():
     if cfg["dashboard"]:
         from .dashboard import start_dashboard
         if start_dashboard(db, app.status, port=cfg["dashboard_port"],
-                           brain=brain) is None:
+                           brain=brain, cfg=cfg) is None:
             # Port already bound: almost certainly another omnihear instance.
             # Two instances both hear the hotkey and both type, interleaving
             # their output — exit instead.
