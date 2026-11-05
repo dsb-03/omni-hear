@@ -106,6 +106,20 @@ def _x11_shape_rounded(root, w, h, r):
         return False
 
 
+def _linux_or_windows_overlay(cfg):
+    """Linux: the transparent ARGB/cairo overlay (x11_overlay.py) when a
+    compositor is running -- the only way to get real rounded corners on
+    GNOME Wayland, whose compositor ignores X SHAPE on XWayland windows.
+    Otherwise, and on Windows, the Tk overlay."""
+    if sys.platform != "win32":
+        try:
+            from .x11_overlay import ArgbOverlay
+            return ArgbOverlay(cfg)
+        except Exception:
+            pass
+    return RecordingOverlay(cfg)
+
+
 class RecordingOverlay:
     """Floating pill on screen (Tk: Linux X11/XWayland and Windows),
     bottom-centre by default. Listening: red dot + waveform that follows the
@@ -367,7 +381,7 @@ class App:
                 from .macos_overlay import MacOverlay
                 self._overlay = MacOverlay(cfg)
             else:
-                self._overlay = RecordingOverlay(cfg)
+                self._overlay = _linux_or_windows_overlay(cfg)
         except Exception as e:
             print(f"omnihear: warning: overlay could not start: {e}")
         # Feeds the live mic level to the overlay (None if it has no meter).
