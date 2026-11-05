@@ -5,6 +5,7 @@ import os
 import subprocess
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
@@ -1151,13 +1152,13 @@ kbd.keycap {
     <div class="card">
       <form id="cfg"></form>
       <div class="btn-group">
-        <button class="action primary" id="save">Save config</button>
+        <button class="action primary" id="save">Save &amp; apply</button>
         <button class="action" id="restart" type="button">Restart service</button>
         <span id="cfg-msg"></span>
       </div>
     </div>
     <p style="font-size:12px;color:var(--text-muted);margin-top:12px;padding-left:4px;">
-      Configuration is saved to <code>~/.config/omnihear/config.toml</code> and requires a restart to take effect.
+      Configuration is saved to <code>~/.config/omnihear/config.toml</code>. Saving restarts omnihear so changes apply right away.
     </p>
   </section>
 
@@ -1267,7 +1268,7 @@ kbd.keycap {
         <div class="wiz-help" id="wiz-help" hidden>
           <b class="h">Nothing happening? Likely fixes:</b>
           <ul>
-            <li>Hold exactly <span class="keys-inline" data-hotkey-caps></span> &mdash; some keyboards have no right-hand Ctrl or Alt. You can pick another key in <a class="inline-link" href="#/settings">Settings</a> (then restart omnihear).</li>
+            <li>Hold exactly <span class="keys-inline" data-hotkey-caps></span> &mdash; some keyboards have no right-hand Ctrl or Alt. You can pick another key in <a class="inline-link" href="#/settings">Settings</a> (saving applies it).</li>
             <li data-os="linux">On Wayland, omnihear reads the keyboard directly and needs the <code>input</code> group &mdash; Step 1 shows the exact command.</li>
             <li data-os="darwin">Allow omnihear under <b>Input Monitoring</b> and <b>Accessibility</b> (System Settings &rarr; Privacy &amp; Security), then quit and reopen it.</li>
             <li>Another program (a game, remote-desktop or screen-sharing tool) may be grabbing that key.</li>
@@ -2254,6 +2255,48 @@ function showMsg(text, ok) {
   if (ok) setTimeout(() => { m.style.opacity = 0; }, 3000);
 }
 
+// Save settings and, if anything changed, restart omnihear so they apply
+// right away. `say(text, ok)` shows progress. Waits for the new process
+// (its /api/status "boot" id differs), following a changed dashboard port.
+async function saveAndRestart(data, say) {
+  let res;
+  try {
+    res = await api('/api/config', {method: 'POST',
+      headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data)});
+  } catch (e) { say('Could not reach omnihear to save.', false); return; }
+  const errs = res.errors && res.errors.length ? 'Errors: ' + res.errors.join('; ') : '';
+  if (!res.changed || !res.changed.length) { say(errs || '✓ No changes to save.', !errs); return; }
+  if (!res.can_restart) {
+    say((errs ? errs + ' — other changes saved' : '✓ Saved') +
+        '. Not running under systemd: restart omnihear manually to apply.', !errs);
+    return;
+  }
+  let before = null;
+  try { before = (await api('/api/status')).boot; } catch (e) {}
+  say((errs ? errs + ' — ' : '') + 'Saved. Restarting omnihear…', false);
+  try { await api('/api/restart', {method: 'POST'}); } catch (e) {}
+  if (res.changed.includes('dashboard') && data.dashboard === false) {
+    say('✓ Saved and restarting. The dashboard is now turned off.', true);
+    return;
+  }
+  const port = res.changed.includes('dashboard_port') ? String(data.dashboard_port) : '';
+  const base = port && port !== location.port ? `http://127.0.0.1:${port}` : '';
+  const deadline = Date.now() + 30000;
+  await new Promise(r => setTimeout(r, 1200));
+  while (Date.now() < deadline) {
+    try {
+      const st = await fetch(base + '/api/status').then(r => r.json());
+      if (st.boot && st.boot !== before) {
+        if (base) { location.href = base + '/' + location.hash; return; }
+        say((errs ? errs + ' — other changes' : '✓ Saved and') + ' applied (omnihear restarted).', !errs);
+        return;
+      }
+    } catch (e) {}   // down while it restarts
+    await new Promise(r => setTimeout(r, 600));
+  }
+  say('Saved, but omnihear has not come back yet. Check: systemctl --user status omnihear', false);
+}
+
 async function saveConfig() {
   if (capture) endCapture(true);
   const form = $('#cfg');
@@ -2268,15 +2311,9 @@ async function saveConfig() {
       data[k] = el.value === '__custom__' ? $('#' + k + '-custom').value : el.value;
     else data[k] = el.value;
   }
-  const res = await api('/api/config', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data)
-  });
-  if (res.errors && res.errors.length)
-    showMsg('Errors: ' + res.errors.join('; '), false);
-  else
-    showMsg('✓ ' + res.message, true);
+  $('#save').disabled = true;
+  try { await saveAndRestart(data, showMsg); }
+  finally { $('#save').disabled = false; }
 }
 
 $('#cfg').addEventListener('submit', e => { e.preventDefault(); saveConfig(); });
@@ -2345,7 +2382,12 @@ async function loadBeta() {
     BETA_KEYS.filter(k => k in cfg).map(k => fieldHtml(k, cfg[k])).join('') + `</div>`;
 }
 
-function betaMsg(sel, text) { const m = $(sel); m.textContent = text; setTimeout(() => { m.textContent = ''; }, 4000); }
+const betaMsgTimers = {};
+function betaMsg(sel, text) {
+  const m = $(sel); m.textContent = text;
+  clearTimeout(betaMsgTimers[sel]);
+  betaMsgTimers[sel] = setTimeout(() => { m.textContent = ''; }, 6000);
+}
 
 async function betaDelWord(w) { await api('/api/brain/word', {method:'POST', body: JSON.stringify({word: w, delete: true})}); loadBeta(); }
 async function betaDelCorr(id) { await api('/api/brain/correction-delete', {method:'POST', body: JSON.stringify({id})}); loadBeta(); }
@@ -2369,10 +2411,7 @@ $('#beta-save').addEventListener('click', async () => {
     if (!el) continue;
     data[k] = BOOLS.includes(k) ? el.checked : el.value;
   }
-  const res = await api('/api/config', {method:'POST',
-    headers: {'Content-Type':'application/json'}, body: JSON.stringify(data)});
-  betaMsg('#beta-msg', res.errors && res.errors.length ? 'Errors: ' + res.errors.join('; ')
-    : '✓ Saved — restart omnihear to apply.');
+  await saveAndRestart(data, text => betaMsg('#beta-msg', text));
 });
 
 $('#fb-send').addEventListener('click', async () => {
@@ -2788,6 +2827,18 @@ def _doctor_report(cfg: dict | None) -> dict:
     return {"rows": rows, "ok": not any(r["status"] == "FAIL" for r in rows)}
 
 
+# Identifies this process to the page, so after a restart it can tell the
+# new omnihear is up (GET /api/status returns it as "boot").
+_BOOT_ID = f"{os.getpid()}-{time.time():.0f}"
+
+
+def _can_restart() -> bool:
+    """Whether POST /api/restart can bring omnihear back by itself: Windows
+    and macOS re-exec in place; Linux only under systemd (a terminal run
+    would just exit)."""
+    return sys.platform in ("win32", "darwin") or bool(os.environ.get("INVOCATION_ID"))
+
+
 def _overlay_js_consts() -> dict:
     """Overlay option lists, ranges and base geometry for the Settings
     preview, so the page never duplicates overlay_anim.py / config.py."""
@@ -2907,6 +2958,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._send(200, _doctor_report(getattr(self.server, "cfg", None)))
         elif url.path == "/api/status":
             st = dict(self.server.status_fn())
+            st["boot"] = _BOOT_ID   # changes when omnihear restarts
             if sys.platform == "darwin":
                 try:
                     from . import macos_permissions as macperm
@@ -2929,31 +2981,36 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self._send(400, {"error": "invalid JSON body"})
                 return
             clean, errors = config_mod.validate_updates(updates)
+            changed = []
             if clean:
                 cfg = config_mod.load_config()
+                changed = sorted(k for k, v in clean.items() if cfg.get(k) != v)
                 cfg.update(clean)
                 config_mod.save_config(cfg)
-            msg = ("Saved. Restart omnihear for changes to take effect."
-                   if clean else "Nothing saved.")
-            self._send(200, {"saved": sorted(clean), "errors": errors,
-                             "message": msg})
+            msg = ("Saved." if changed else
+                   "No changes." if clean else "Nothing saved.")
+            # The page restarts omnihear itself when `changed` is non-empty.
+            self._send(200, {"saved": sorted(clean), "changed": changed,
+                             "errors": errors, "message": msg,
+                             "can_restart": _can_restart()})
         elif url.path == "/api/restart":
-            if sys.platform in ("win32", "darwin"):
+            if not _can_restart():
+                self._send(200, {"restarting": False, "message":
+                                 "Not running under systemd; restart omnihear manually."})
+            elif sys.platform in ("win32", "darwin"):
                 # Frozen (PyInstaller) argv[0] is the exe itself; drop it so
                 # the relaunch doesn't get its own path as a positional arg.
                 threading.Timer(0.5, lambda: os.execv(
                     sys.executable, [sys.executable] + sys.argv[1:]
                 )).start()
-                self._send(200, {"message": "Restarting…"})
-            elif os.environ.get("INVOCATION_ID"):
+                self._send(200, {"restarting": True, "message": "Restarting…"})
+            else:
                 # Running under systemd: ask it to restart us.
                 threading.Timer(0.5, lambda: subprocess.Popen(
                     ["systemctl", "--user", "restart", "omnihear"]
                 )).start()
-                self._send(200, {"message": "Restarting via systemd…"})
-            else:
-                self._send(200, {"message":
-                                 "Not running under systemd; restart omnihear manually."})
+                self._send(200, {"restarting": True,
+                                 "message": "Restarting via systemd…"})
         elif url.path == "/api/correction":
             body = self._json_body()
             if body is None:
