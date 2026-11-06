@@ -243,6 +243,11 @@ Built and beta, off by default. Notes on what shipped vs. the plan below:
   queues tagged `("chunk", gen, audio, duration)` jobs on the existing
   worker; the final `("transcribe", audio|None, duration, mode, gen)` job
   joins the chunk texts and runs the normal pipeline once.
+- Models: smart cleanup defaults to Muesli's Qwen3.5-2B dictation-cleanup
+  fine-tune (Q4_K_M GGUF, ~1.3 GB, pulled from Hugging Face through
+  Ollama) in its exact raw training format; Command Mode and Q&A default
+  to the general `qwen3.5:2b`. Chosen for speed, then RAM, then precision.
+  `think: false` keeps Qwen3.5 from spending the budget reasoning.
 - Whisper mode's overlay hint is a boosted meter, not a separate state, so
   the three overlay renderers didn't need changes.
 

@@ -18,6 +18,17 @@ import urllib.request
 from urllib.parse import urlparse
 
 KEEP_ALIVE = "15m"  # keep the model loaded between dictations
+
+# Defaults (config.py). Smart cleanup uses Muesli's dictation-cleanup
+# fine-tune of Qwen3.5-2B (Q4_K_M GGUF, ~1.3 GB): trained to clean up
+# speech-to-text output and never answer it. Command Mode and voice Q&A
+# need a model that *does* follow instructions, so they use the general
+# Qwen3.5-2B.
+DEFAULT_CLEANUP_MODEL = "hf.co/Muesli-HQ/qwen35-2b-muesli-cleanup-v12-gguf:Q4_K_M"
+DEFAULT_ASSIST_MODEL = "qwen3.5:2b"
+# Dictations shorter than this skip the LLM: the rules already handle
+# them, and an LLM call on a few words is mostly wasted time.
+MIN_SMART_WORDS = 6
 _LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1", "0.0.0.0"}
 # Bypass any http(s)_proxy: this is a localhost call.
 _OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
@@ -37,6 +48,8 @@ def base_url() -> str | None:
 
 
 def _post(path: str, body: dict, timeout: float) -> dict | None:
+    """POST JSON; the decoded reply, {"error": ...} for an HTTP error
+    Ollama explained, or None when unreachable/timed out."""
     url = base_url()
     if url is None:
         return None
@@ -46,8 +59,36 @@ def _post(path: str, body: dict, timeout: float) -> dict | None:
     try:
         with _OPENER.open(req, timeout=timeout) as r:
             return json.loads(r.read() or b"{}")
+    except urllib.error.HTTPError as e:
+        try:
+            err = json.loads(e.read() or b"{}").get("error")
+        except (OSError, ValueError, AttributeError):
+            err = None
+        return {"error": str(err or f"HTTP {e.code}")}
     except (OSError, ValueError, urllib.error.URLError):
         return None
+
+
+def installed_models(timeout: float = 1.0) -> list[str] | None:
+    """Names Ollama has pulled, or None if it isn't reachable."""
+    url = base_url()
+    if url is None:
+        return None
+    try:
+        with _OPENER.open(url + "/api/tags", timeout=timeout) as r:
+            data = json.loads(r.read() or b"{}")
+    except (OSError, ValueError, urllib.error.URLError):
+        return None
+    return [m.get("name", "") for m in data.get("models", [])]
+
+
+def is_installed(model: str, names: list[str]) -> bool:
+    """Ollama lists "qwen3.5:2b" as-is and a bare name with ":latest";
+    hf.co names may differ only in case."""
+    want = model.lower()
+    if ":" not in want.rsplit("/", 1)[-1]:
+        want += ":latest"
+    return any(n.lower() == want for n in names)
 
 
 def available(timeout: float = 0.5) -> bool:
@@ -76,13 +117,36 @@ def warm(model: str) -> None:
           timeout=60)
 
 
+_no_think = set()  # models that rejected the "think" option
+
+
 def generate(prompt: str, model: str, timeout: float,
-             system: str | None = None) -> str | None:
+             system: str | None = None, raw: bool = False,
+             max_tokens: int | None = None,
+             stop: list[str] | None = None) -> str | None:
+    """One completion. Thinking is switched off (think: false): reasoning
+    models like Qwen3.5 would otherwise spend the whole time budget
+    thinking. raw=True sends `prompt` verbatim, chat markup included, for
+    fine-tunes that need their exact training format."""
+    options = {"temperature": 0.2}
+    if max_tokens:
+        options["num_predict"] = max_tokens
+    if stop:
+        options["stop"] = stop
     body = {"model": model, "prompt": prompt, "stream": False,
-            "keep_alive": KEEP_ALIVE, "options": {"temperature": 0.2}}
+            "keep_alive": KEEP_ALIVE, "options": options}
     if system:
         body["system"] = system
+    if raw:
+        body["raw"] = True
+    elif model not in _no_think:
+        body["think"] = False
     out = _post("/api/generate", body, timeout)
+    if out and "think" in body and "think" in str(out.get("error", "")).lower():
+        # Older Ollama, or a model without a thinking switch: drop it.
+        _no_think.add(model)
+        body.pop("think")
+        out = _post("/api/generate", body, timeout)
     text = (out or {}).get("response")
     return text.strip() if isinstance(text, str) and text.strip() else None
 
@@ -140,14 +204,75 @@ POLISH_SYSTEM = (
     "summarize, translate or add anything. Reply with ONLY the cleaned "
     "text.")
 
+# Muesli's v12/v14 cleanup fine-tunes were trained on one exact format
+# (Muesli-HQ/muesli, MuesliCleanupV2Prompt.swift, MIT): this instruction,
+# an optional <APP-CONTEXT> block, then the transcript, all in a single
+# user turn, with an empty think block opening the answer. Sent raw so
+# Ollama's chat template can't change it.
+MUESLI_SYSTEM = """Clean up speech-to-text transcription. Only make changes when there is a clear error. If the text is already correct, output it exactly as-is.
 
-def polish(text: str, model: str, budget_s: float) -> str | None:
+The user input may include an <APP-CONTEXT> section with focused app, document, URL, selected text, or OCR screen text. Use it only to resolve obvious transcription errors, names, acronyms, and formatting intent. Never copy app context into the output unless the user dictated it.
+
+You may: fix obvious misspellings, remove filler words (um, uh, like), apply 'scratch that' deletions, and format numbered or bullet lists when dictated.
+
+Do not: paraphrase, reword, add words, remove meaningful words, change the meaning in any way, wrap the output in markdown, code fences, tags, labels, or commentary, or repeat the output more than once. Preserve the speaker's original phrasing."""
+
+
+def is_muesli_cleanup(model: str) -> bool:
+    return "muesli-cleanup" in model.lower()
+
+
+def muesli_prompt(text: str, app: str | None = None) -> str:
+    context = f"<APP-CONTEXT>\nApp: {app[:200]}\n</APP-CONTEXT>\n\n" if app else ""
+    return ("<|im_start|>user\n" + MUESLI_SYSTEM + "\n\n" + context + text
+            + "<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n")
+
+
+def _clean_muesli(out: str, text: str) -> str:
+    """Strip what the fine-tune can echo: a stray "model" line, the
+    context markers, or a verbatim paragraph of its instruction."""
+    paragraphs = [p for p in MUESLI_SYSTEM.split("\n\n") if len(p) >= 30]
+    keep_model = re.match(r"model\b", text.strip(), re.IGNORECASE)
+    while out:
+        before = out
+        if not keep_model:
+            if out == "model":
+                out = ""
+            elif out.startswith("model\n"):
+                out = out[6:]
+        for marker in ("</APP-CONTEXT>", "<APP-CONTEXT>"):
+            if out.startswith(marker):
+                out = out[len(marker):].strip()
+        for p in paragraphs:
+            if out == p or out.startswith(p + "\n"):
+                out = out[len(p):].strip()
+        out = out.strip()
+        if out == before:
+            break
+    return out
+
+
+def polish(text: str, model: str, budget_s: float, app: str | None = None,
+           allow_newlines: bool = True) -> str | None:
     """LLM cleanup of one dictation within budget_s seconds; None if it is
-    slow, unavailable, or its answer doesn't look like an edit of `text`."""
-    out = generate(text, model, budget_s, system=POLISH_SYSTEM)
+    too short to bother, slow, unavailable, or its answer doesn't look like
+    an edit of `text`. allow_newlines=False rejects answers that add line
+    breaks (typed as Enter, which sends the message in chat apps)."""
+    if len(text.split()) < MIN_SMART_WORDS:
+        return None
+    limit = len(text) * 3 // 4 + 64  # ~3x the input, in tokens
+    if is_muesli_cleanup(model):
+        out = generate(muesli_prompt(text, app), model, budget_s, raw=True,
+                       max_tokens=limit, stop=["<|im_end|>", "<|im_start|>"])
+        out = _clean_muesli(out, text) if out else None
+    else:
+        out = generate(text, model, budget_s, system=POLISH_SYSTEM,
+                       max_tokens=limit)
     if not out:
         return None
     out = tidy_output(out)
+    if not allow_newlines and "\n" in out and "\n" not in text:
+        return None
     return out if plausible_edit(text, out) else None
 
 
@@ -165,6 +290,43 @@ def plausible_edit(before: str, after: str) -> bool:
     return difflib.SequenceMatcher(a=wa, b=wb).ratio() >= 0.6
 
 
+BENCH_SAMPLES = [
+    "so um I think we should uh move the meeting to Thursday actually no Friday",
+    "can you send me the the report by end of day I need it for the client call",
+    "my priorities are first finish the slides second email Ana and finally book the flight",
+    "honestly I I wasn't sure if like the numbers were right so I double checked them",
+]
+
+
+def bench(models: list[str], runs: int = 2) -> int:
+    """`omnihear --bench-llm`: time each model on sample dictations on this
+    machine (after a warm-up), and show what it produced."""
+    if not available():
+        print("Ollama is not reachable (start it with `ollama serve`).")
+        return 1
+    names = installed_models() or []
+    for model in models:
+        print(f"\n== {model}")
+        if not is_installed(model, names):
+            print(f"   not pulled -- run: ollama pull {model}")
+            continue
+        warm_t = time.monotonic()
+        _post("/api/generate", {"model": model, "keep_alive": KEEP_ALIVE},
+              timeout=300)
+        print(f"   load: {time.monotonic() - warm_t:.1f}s")
+        times = []
+        for sample in BENCH_SAMPLES:
+            for i in range(runs):
+                t = time.monotonic()
+                out = polish(sample, model, budget_s=30)
+                times.append(time.monotonic() - t)
+            print(f"   {times[-1]:.2f}s  {sample!r}\n          -> {out!r}")
+        times.sort()
+        print(f"   median {times[len(times) // 2]:.2f}s, "
+              f"worst {times[-1]:.2f}s over {len(times)} runs")
+    return 0
+
+
 if __name__ == "__main__":
     assert tidy_output("Here is the rewritten text:\n\nHello there.") == "Hello there."
     assert tidy_output('"Hi, Bob."') == "Hi, Bob."
@@ -177,6 +339,15 @@ if __name__ == "__main__":
                               "The meeting is at 3pm according to your calendar, "
                               "and you should prepare the slides beforehand.")
     assert not plausible_edit("hello world", "")
+    p = muesli_prompt("hello there", "slack")
+    assert p.startswith("<|im_start|>user\nClean up speech-to-text transcription.")
+    assert "\n\n<APP-CONTEXT>\nApp: slack\n</APP-CONTEXT>\n\nhello there<|im_end|>" in p
+    assert p.endswith("<|im_start|>assistant\n<think>\n\n</think>\n\n")
+    assert _clean_muesli("model\nHello.", "hello") == "Hello."
+    assert _clean_muesli("model railways are fun", "model railways are fun") == "model railways are fun"
+    assert polish("too short to bother", "m", 1) is None
+    assert is_installed("qwen3.5:2b", ["qwen3.5:2b"]) and is_installed("llama3.2", ["llama3.2:latest"])
+    assert is_installed(DEFAULT_CLEANUP_MODEL, [DEFAULT_CLEANUP_MODEL.lower()])
     os.environ["OLLAMA_HOST"] = "example.com:11434"
     assert base_url() is None and generate("x", "m", 1) is None
     os.environ["OLLAMA_HOST"] = "0.0.0.0:9999"

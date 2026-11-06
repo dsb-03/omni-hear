@@ -59,14 +59,25 @@ def _clipboard_row() -> tuple[str, str, str]:
 def _llm_row(cfg: dict) -> tuple[str, str, str]:
     """Command Mode / smart cleanup: is a local Ollama reachable?"""
     from . import llm
-    label, model = "local AI (Ollama)", cfg.get("ask_model") or "llama3.2"
+    label = "local AI (Ollama)"
+    model = cfg.get("ask_model") or llm.DEFAULT_ASSIST_MODEL
     if llm.base_url() is None:
         return (FAIL, label, "OLLAMA_HOST is not on this machine; omnihear "
                 "only uses a local Ollama")
-    if llm.available():
-        return (OK, label, f"running; model {model} "
-                f"(`ollama pull {model}` if it is missing)")
-    how = ("install from ollama.com, then `ollama pull " + model + "`"
+    names = llm.installed_models()
+    if names is not None:
+        wanted = []
+        if cfg.get("cleanup") == "smart":
+            wanted.append(cfg.get("cleanup_model") or llm.DEFAULT_CLEANUP_MODEL)
+        if cfg.get("command_hotkey"):
+            wanted.append(model)
+        missing = [m for m in dict.fromkeys(wanted)
+                   if not llm.is_installed(m, names)]
+        if missing:
+            return (WARN, label, "running; pull the model(s): " + "; ".join(
+                f"`ollama pull {m}`" for m in missing))
+        return (OK, label, "running; " + ", ".join(dict.fromkeys(wanted)))
+    how = ("install from ollama.com, then `ollama pull` the model(s)"
            if not shutil.which("ollama") else "installed but not running — "
            "start it (`ollama serve`)")
     return (WARN, label, how)

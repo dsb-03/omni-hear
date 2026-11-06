@@ -137,6 +137,13 @@ def build_parser(cfg: dict) -> argparse.ArgumentParser:
                    default=cfg["verbose"],
                    help="Print per-transcription output to the terminal "
                         "(recording, queued audio, transcribed text).")
+    p.add_argument("--cleanup-model", default=cfg["cleanup_model"],
+                   help="Ollama model for --cleanup smart (default: a "
+                        "dictation-cleanup fine-tune of Qwen3.5-2B).")
+    p.add_argument("--bench-llm", nargs="*", metavar="MODEL",
+                   help="Time local Ollama models on sample dictations and "
+                        "exit (default: the configured cleanup and "
+                        "Command Mode models).")
     p.add_argument("--doctor", action="store_true",
                    help="Check this machine's setup (session, hotkey and "
                         "typing permissions, audio, model deps), print fixes, "
@@ -174,6 +181,12 @@ def main():
     if args.doctor:
         from . import doctor
         sys.exit(doctor.main(cfg))
+
+    if args.bench_llm is not None:
+        from . import llm
+        models = args.bench_llm or list(dict.fromkeys(
+            [cfg["cleanup_model"], cfg["ask_model"]]))
+        sys.exit(llm.bench(models))
 
     if args.list_devices:
         from .app import list_devices

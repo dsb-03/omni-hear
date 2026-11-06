@@ -1975,7 +1975,7 @@ const SECTIONS = [
   ['Transcription Engine', ['model','language','device','compute_type','beam_size']],
   ['Input & Trigger', ['hotkey','sample_rate','min_duration','type_method']],
   ['Dictation (new)', ['hands_free','max_recording_seconds','paste_last_hotkey','cleanup']],
-  ['Local AI editing (new)', ['command_hotkey','ask_model','smart_cleanup_ms']],
+  ['Local AI editing (new)', ['command_hotkey','ask_model','cleanup_model','smart_cleanup_ms']],
   ['Long & quiet dictation (new)', ['chunked_transcription','chunk_seconds','whisper_mode','code_switching']],
   ['Hallucination Filtering', ['vad_filter','no_speech_threshold',
     'log_prob_threshold','compression_ratio_threshold','condition_on_previous_text']],
@@ -2026,7 +2026,8 @@ const HELP = {
   rag_context: 'Retrieve relevant past transcriptions (keyword search over history.db) and feed them to Whisper as extra initial_prompt context, alongside Common Brain’s vocabulary.',
   rag_context_limit: 'Max past transcriptions to feed as RAG context.',
   ask_hotkey: 'Second push-to-talk key/combo (e.g. "ctrl_l+space"): hold, ask a question, release to get a locally-generated answer typed instead of the raw transcript. Empty disables it. Requires Ollama installed locally.',
-  ask_model: 'Local Ollama model (e.g. "llama3.2") used by Command Mode, smart cleanup and voice Q&A. Install Ollama and run "ollama pull <model>" first.',
+  ask_model: 'Local Ollama model that follows instructions, used by Command Mode and voice Q&A. Default qwen3.5:2b. Install Ollama and run "ollama pull <model>" first.',
+  cleanup_model: 'Local Ollama model for cleanup = smart. The default is a Qwen3.5-2B fine-tuned only for cleaning up dictation (about 1.3 GB). Pull it with: ollama pull hf.co/Muesli-HQ/qwen35-2b-muesli-cleanup-v12-gguf:Q4_K_M'
   ask_context_limit: 'Max past transcriptions retrieved as context for voice Q&A.',
   overlay_scale: 'Overall size of the recording indicator. 1 is the original compact size.',
   overlay_position: 'Where on screen the indicator appears.',
@@ -2043,7 +2044,7 @@ const HELP = {
   overlay_bar_height: 'Height of the tallest waveform bar, before scaling. The container grows to fit.',
   overlay_bar_shape: 'Waveform bars with rounded ends, or square ends.',
 };
-const FIELD_LABELS = {ask_model: 'local AI model (Ollama)', smart_cleanup_ms: 'smart cleanup budget (ms)'};
+const FIELD_LABELS = {ask_model: 'Command Mode / Q&A model (Ollama)', cleanup_model: 'smart cleanup model (Ollama)', smart_cleanup_ms: 'smart cleanup budget (ms)'};
 const pretty = k => OVERLAY_LABELS[k] || FIELD_LABELS[k] || k.replace(/_/g, ' ');
 const prettyOpt = o => o.replace(/_/g, ' ');
 const keyDisplay = hk => String(hk).split('+').filter(Boolean)

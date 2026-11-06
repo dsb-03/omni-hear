@@ -176,11 +176,14 @@ DEFAULTS = {
     "rag_context": False,
     "rag_context_limit": 3,
     "ask_hotkey": "",
-    "ask_model": "llama3.2",
+    "ask_model": "qwen3.5:2b",    # Command Mode + voice Q&A (llm.DEFAULT_ASSIST_MODEL)
     "ask_context_limit": 5,
     # Local AI editing (1.12, beta; llm.py talks to a local Ollama).
     "command_hotkey": "",          # hold, speak an edit for the selected text
     "smart_cleanup_ms": 1500,      # cleanup = "smart": LLM time budget
+    # cleanup = "smart" model: Muesli's dictation-cleanup fine-tune of
+    # Qwen3.5-2B (llm.DEFAULT_CLEANUP_MODEL).
+    "cleanup_model": "hf.co/Muesli-HQ/qwen35-2b-muesli-cleanup-v12-gguf:Q4_K_M",
     "chunked_transcription": False,  # transcribe long dictations at pauses
     "chunk_seconds": 10,           # min audio per chunk before cutting
     "whisper_mode": False,         # quiet-speech profile

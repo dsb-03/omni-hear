@@ -119,7 +119,19 @@ history on.
 
 Off by default; Settings > "Local AI editing" and "Long & quiet dictation".
 The AI features need [Ollama](https://ollama.com) running on this computer
-with a model pulled (`ollama pull llama3.2`); `omnihear --doctor` checks it.
+and two small models pulled; `omnihear --doctor` checks both, and
+`omnihear --bench-llm` times them on your machine:
+
+```bash
+ollama pull hf.co/Muesli-HQ/qwen35-2b-muesli-cleanup-v12-gguf:Q4_K_M  # smart cleanup, ~1.3 GB
+ollama pull qwen3.5:2b                                                # Command Mode / Q&A
+```
+
+Smart cleanup uses Muesli's fine-tune of Qwen3.5-2B, trained only to
+clean up dictation (never to answer it), in its exact training prompt
+format. Command Mode needs a model that follows instructions, so it uses
+the general Qwen3.5-2B (`ask_model`). Each recording pre-loads only the
+model it needs.
 omnihear only talks to a local Ollama and refuses a non-local
 `OLLAMA_HOST`.
 
@@ -133,11 +145,13 @@ omnihear only talks to a local Ollama and refuses a non-local
   - Nothing selected: it answers like voice Q&A.
   - Ollama not running: the selection is left untouched and you get a
     notification.
-- [x] **Smart cleanup** (`cleanup = "smart"`): the light rules, then a
-  local-model pass for grammar and punctuation. If it takes longer than
-  `smart_cleanup_ms` (default 1.5 s) or the answer doesn't look like an
-  edit of what you said, the light result is typed. The model is pre-loaded
-  as you start talking.
+- [x] **Smart cleanup** (`cleanup = "smart"`, model `cleanup_model`): the
+  light rules, then a local-model pass for grammar and punctuation. If it
+  takes longer than `smart_cleanup_ms` (default 1.5 s) or the answer
+  doesn't look like an edit of what you said, the light result is typed.
+  Dictations under 6 words skip the model. Line breaks from the model
+  (it formats dictated lists) are only kept in apps whose style is
+  Document. The model is pre-loaded as you start talking.
 - [x] **Faster long dictations** (`chunked_transcription`): while you're
   still talking, audio is transcribed in chunks at natural pauses (after at
   least `chunk_seconds`, default 10). On release only the last piece is

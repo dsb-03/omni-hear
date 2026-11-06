@@ -1314,7 +1314,7 @@ class App:
                     from . import cleanup
                     text = cleanup.clean(text, level, lang)
                 if text and level == "smart":
-                    text = self._smart_cleanup(text)
+                    text = self._smart_cleanup(text, app_name)
                 if text and self._brain_active() and self.cfg.get("brain_autocorrect"):
                     try:
                         text = self.brain.apply(text)
@@ -1412,33 +1412,56 @@ class App:
 
     # -- local AI editing (llm.py) ---------------------------------------
     def _llm_model(self):
-        return self.cfg.get("ask_model") or "llama3.2"
+        """Instruction-following model: Command Mode and voice Q&A."""
+        from . import llm
+        return self.cfg.get("ask_model") or llm.DEFAULT_ASSIST_MODEL
 
-    def _uses_llm(self):
-        return bool(self.cfg.get("command_hotkey")
-                    or self.cfg.get("cleanup") == "smart")
+    def _cleanup_model(self):
+        """Smart cleanup's model (a dictation-cleanup fine-tune by default)."""
+        from . import llm
+        return self.cfg.get("cleanup_model") or llm.DEFAULT_CLEANUP_MODEL
+
+    def _models_to_warm(self):
+        # Only what this recording will use, so a plain dictation doesn't
+        # also keep the Command Mode model in RAM.
+        if self._recording_mode == "dictate":
+            return ([self._cleanup_model()]
+                    if self.cfg.get("cleanup") == "smart" else [])
+        return [self._llm_model()]  # "ask" / "command"
 
     def _warm_llm(self):
-        """Pre-load the Ollama model as a recording starts (background)."""
-        if not self._uses_llm():
+        """Pre-load the Ollama model(s) this recording may need, in the
+        background, so the first edit isn't a cold start."""
+        models = self._models_to_warm()
+        if not models:
             return
 
         def warm():
             try:
                 from . import llm
-                llm.warm(self._llm_model())
+                for m in dict.fromkeys(models):
+                    llm.warm(m)
             except Exception:
                 pass
         threading.Thread(target=warm, daemon=True).start()
 
-    def _smart_cleanup(self, text):
+    def _smart_cleanup(self, text, app_name=None):
         """cleanup = "smart": an LLM polish within smart_cleanup_ms; the
-        rule-cleaned text if it's slow, unavailable or implausible."""
+        rule-cleaned text if it's short, slow, unavailable or implausible.
+        Line breaks (the model formats dictated lists) are only accepted
+        where the app's style is "document" -- elsewhere Enter may send."""
         from . import llm
         budget = self.cfg.get("smart_cleanup_ms", 1500) / 1000
+        allow_newlines = False
+        if self.personal is not None:
+            try:
+                allow_newlines = self.personal.style_for(app_name) == "document"
+            except Exception:
+                pass
         t0 = time.monotonic()
         try:
-            out = llm.polish(text, self._llm_model(), budget)
+            out = llm.polish(text, self._cleanup_model(), budget, app=app_name,
+                             allow_newlines=allow_newlines)
         except Exception as e:
             out = None
             self._log(f"smart cleanup failed: {e}")
