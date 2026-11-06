@@ -167,6 +167,33 @@ def paste_chord(method: str) -> bool:
         return False
 
 
+def copy_chord(method: str) -> bool:
+    """Press Ctrl+Insert, which copies the selection to CLIPBOARD in GTK,
+    Qt, Chromium, Firefox and VTE terminals alike (Ctrl+C would interrupt
+    a terminal). Used by Command Mode. True if it was sent."""
+    if method == "uinput":
+        from . import uinput_keyboard
+        try:
+            uinput_keyboard.default_keyboard().copy_chord()
+        except OSError:
+            return False
+        return True
+    if method == "xdotool":
+        argv = ["xdotool", "key", "--clearmodifiers", "ctrl+Insert"]
+    elif method == "ydotool":
+        # KEY_LEFTCTRL = 29, KEY_INSERT = 110; :1 press, :0 release.
+        argv = ["ydotool", "key", "29:1", "110:1", "110:0", "29:0"]
+    elif method == "wtype":
+        argv = ["wtype", "-M", "ctrl", "-s", "50", "-k", "Insert",
+                "-m", "ctrl"]
+    else:
+        raise ValueError(f"unknown type method for Linux inject: {method}")
+    try:
+        return subprocess.run(argv, check=False, timeout=5).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
 def in_input_group_pending() -> bool:
     """User is listed in the `input` group but this process predates it
     (group changes only apply after logging out and back in)."""

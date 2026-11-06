@@ -69,9 +69,9 @@ Dictation) or `config.toml`.
     phrase with one word changed). "That was, actually, quite good" stays
     as is.
   - English only.
-  - Spoken lists are *not* turned into bullets yet: a typed newline is
-    Enter, which sends the message in chat apps. Moved to per-app styles
-    (1.11).
+  - Spoken lists are turned into bullets by the per-app Document style
+    (1.11), not here: a typed newline is Enter, which sends the message in
+    chat apps.
 - [x] **First-run setup wizard** in the dashboard (Setup tab, opens by
   itself the first time). Three steps:
   1. The `--doctor` checks, with copy buttons for every fix command.
@@ -83,28 +83,87 @@ Dictation) or `config.toml`.
 - [x] **Record any hotkey by pressing it** in the dashboard: main hotkey,
   paste-last and voice Q&A, with a Clear button for the optional ones.
 
-### Planned
+### Built in this branch (1.11, Personal)
 
-**1.11: Personal**
-- [ ] **Personal dictionary**: add or pin names and jargon. Merges with the
-  words Common Brain learns automatically. Import and export as plain text.
-- [ ] **Snippets**: say a trigger phrase ("insert my address") to type a
-  saved block of text.
-- [ ] **Per-app styles**: casual in chat, formal in email, set per app in
-  the dashboard (X11, Windows and macOS; GNOME Wayland uses the default).
-- [ ] **Insights**: words per minute, time saved vs. typing, daily streak,
-  and top apps.
+All on the dashboard's new **Personal** tab (Insights are on the main
+Dashboard). Nothing changes until you add an entry, and edits apply to the
+next dictation without a restart. Stored in `history.db`, so they need
+history on.
 
-**1.12: Local AI editing**
-- [ ] **Command Mode**: select text, hold a key, and say "make this shorter"
-  or "turn this into bullets". A local Ollama model rewrites it in place.
-- [ ] **Smart cleanup**: an optional local-LLM pass for grammar and tone,
-  with a latency budget that falls back to rule-based cleanup.
-- [ ] **Faster long dictations**: transcribe in chunks at natural pauses
-  while you're still talking.
-- [ ] **Whisper mode**: a profile for speaking quietly (open-plan offices,
-  late nights).
-- [ ] **Language switching mid-session** when the language is set to auto.
+- [x] **Personal dictionary**: add names and jargon, optionally with how
+  they sound when Whisper gets them wrong ("omni hear" → "Omnihear").
+  - Given to Whisper as hints, pinned words first, merged with the words
+    Common Brain has learned (which also show up as one-click suggestions).
+  - Fixed after transcription: the spoken forms you list, the exact
+    spelling ("github" → "GitHub", also when split as "git hub"), and
+    sound-alikes.
+  - Import and export as plain text (`*` pins, `= a, b` lists sound-alikes).
+- [x] **Snippets**: say a trigger phrase ("insert my address") on its own
+  to type a saved block of text. Only the whole dictation triggers it, so
+  it never fires mid-sentence. History keeps what you said.
+- [x] **Per-app styles**: None, Casual (no final full stop, no automatic
+  capital), Formal (capitalized sentences and "I", final full stop) or
+  Document (see below), per app plus a default for every other app. The
+  app is detected on X11 (needs xdotool), Windows and macOS; on Wayland
+  the default style applies.
+- [x] **Insights**: speaking speed, time saved vs. typing at 40 wpm,
+  current and longest daily streak, and top apps.
+- [x] **Spoken lists → bullets** (the Document style): "first …, second
+  …, finally …" or "number one … number two …" becomes a numbered list,
+  "bullet point … bullet point …" a bulleted one. Needs two or more items
+  in order, and the list has to start a clause, so "the first time" or
+  "I was number one in the class" stay prose. Lines are typed with Enter,
+  so set it only for editors and documents, not chat apps.
+
+### Built in this branch (1.12, Local AI editing, beta)
+
+Off by default; Settings > "Local AI editing" and "Long & quiet dictation".
+The AI features need [Ollama](https://ollama.com) running on this computer
+and two small models pulled; `omnihear --doctor` checks both, and
+`omnihear --bench-llm` times them on your machine:
+
+```bash
+ollama pull hf.co/Muesli-HQ/qwen35-2b-muesli-cleanup-v12-gguf:Q4_K_M  # smart cleanup, ~1.3 GB
+ollama pull qwen3.5:2b                                                # Command Mode / Q&A
+```
+
+Smart cleanup uses Muesli's fine-tune of Qwen3.5-2B, trained only to
+clean up dictation (never to answer it), in its exact training prompt
+format. Command Mode needs a model that follows instructions, so it uses
+the general Qwen3.5-2B (`ask_model`). Each recording pre-loads only the
+model it needs.
+omnihear only talks to a local Ollama and refuses a non-local
+`OLLAMA_HOST`.
+
+- [x] **Command Mode** (`command_hotkey`): select text, hold the key, say
+  "make this shorter" or "turn this into bullets", release. The local model
+  rewrites the selection in place.
+  - omnihear reads the selection by sending the copy key (Ctrl+Insert on
+    Linux, so terminals work too; Ctrl+C on Windows, Cmd+C on macOS) and
+    puts your clipboard back afterwards. Needs a clipboard tool on Linux
+    (xclip, or wl-clipboard on KDE/wlroots).
+  - Nothing selected: it answers like voice Q&A.
+  - Ollama not running: the selection is left untouched and you get a
+    notification.
+- [x] **Smart cleanup** (`cleanup = "smart"`, model `cleanup_model`): the
+  light rules, then a local-model pass for grammar and punctuation. If it
+  takes longer than `smart_cleanup_ms` (default 1.5 s) or the answer
+  doesn't look like an edit of what you said, the light result is typed.
+  Dictations under 6 words skip the model. Line breaks from the model
+  (it formats dictated lists) are only kept in apps whose style is
+  Document. The model is pre-loaded as you start talking.
+- [x] **Faster long dictations** (`chunked_transcription`): while you're
+  still talking, audio is transcribed in chunks at natural pauses (after at
+  least `chunk_seconds`, default 10). On release only the last piece is
+  left to transcribe. Each chunk gets the previous text as context.
+- [x] **Whisper mode** (`whisper_mode`): boosts quiet audio (loudness
+  normalization instead of peak), lowers the voice-detection and
+  no-speech thresholds, and boosts the overlay meter so a whisper still
+  shows.
+- [x] **Language switching** (`code_switching`, with language = auto):
+  Whisper may change language within one dictation. Without it, a chunked
+  dictation keeps the language detected in its first chunk.
+
 
 ## Other improvements
 

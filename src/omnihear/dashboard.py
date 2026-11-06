@@ -10,6 +10,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 from . import config as config_mod
+from . import personal as personal_mod
 
 PAGE = """<!DOCTYPE html>
 <html lang="en">
@@ -288,6 +289,35 @@ h2 {
   color: var(--text);
   letter-spacing: -0.2px;
 }
+
+/* Personal screen */
+.muted-note { font-size: 13px; color: var(--text-muted); margin: 8px 4px 0; line-height: 1.5; }
+.p-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.p-row > input { flex: 1 1 180px; min-width: 0; }
+.p-row label.check, #screen-personal td label.check { display: flex; gap: 8px; margin: 0; padding: 0; }
+.p-row > label:not(.check) { display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 600; color: var(--text-muted); }
+#screen-personal input:not([type=checkbox]),
+#screen-personal select,
+#screen-personal textarea {
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--card-solid);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 14px;
+}
+#screen-personal textarea { resize: vertical; }
+#screen-personal input:focus, #screen-personal select:focus, #screen-personal textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+#screen-personal td select { padding: 4px 8px; }
+#screen-personal details summary { cursor: pointer; font-size: 14px; font-weight: 600; color: var(--text-muted); }
+.p-msg { font-size: 13px; color: var(--text-muted); display: inline-block; min-height: 1.2em; margin: 6px 0; }
+.p-pre { white-space: pre-wrap; max-width: 420px; }
+.learned-chip { margin: 0 6px 6px 0; }
 
 /* Dashboard Cards and Grid */
 .tiles {
@@ -1073,6 +1103,7 @@ kbd.keycap {
     <nav>
       <a href="#/" id="nav-dashboard">Dashboard</a>
       <a href="#/history" id="nav-history">History</a>
+      <a href="#/personal" id="nav-personal">Personal</a>
       <a href="#/settings" id="nav-settings">Settings</a>
       <a href="#/beta" id="nav-beta">Beta</a>
       <a href="#/welcome" id="nav-welcome">Setup</a>
@@ -1103,6 +1134,9 @@ kbd.keycap {
 
   <!-- Dashboard Screen -->
   <section class="screen" id="screen-dashboard">
+    <h2>Insights</h2>
+    <div class="tiles" id="insight-tiles"></div>
+    <p class="muted-note" id="insight-apps"></p>
     <h2>Analytics</h2>
     <div class="tiles" id="tiles"></div>
     <h2>Activity (last 30 days)</h2>
@@ -1160,6 +1194,81 @@ kbd.keycap {
     <p style="font-size:12px;color:var(--text-muted);margin-top:12px;padding-left:4px;">
       Configuration is saved to <code>~/.config/omnihear/config.toml</code>. Saving restarts omnihear so changes apply right away.
     </p>
+  </section>
+
+  <!-- Personal Screen: dictionary, snippets, per-app styles -->
+  <section class="screen" id="screen-personal">
+    <h2>Personal dictionary</h2>
+    <div class="card" style="margin-bottom:24px;">
+      <p class="muted-note" style="margin-top:0;">Names, products and jargon omnihear should always spell your way.
+        They are given to Whisper as hints (pinned words first) and fixed after transcription.
+        Add how a word sounds when Whisper gets it wrong, e.g. <i>omni hear</i> for <b>Omnihear</b>.</p>
+      <div class="p-row">
+        <input id="dict-word" placeholder="Word or phrase (e.g. Kubernetes)" maxlength="100">
+        <input id="dict-alias" placeholder="Sounds like (optional, comma-separated)">
+        <label class="check" title="Pinned words always go to Whisper first"><input type="checkbox" id="dict-pin"><span>Pin</span><div class="switch-slider"></div></label>
+        <button class="action primary" id="dict-add" type="button">Add</button>
+      </div>
+      <span id="dict-msg" class="p-msg"></span>
+      <div class="table-container" style="max-height:320px;overflow-y:auto;">
+        <table><thead><tr><th>Word</th><th>Sounds like</th><th>Pinned</th><th></th></tr></thead>
+        <tbody id="dict-rows"></tbody></table>
+      </div>
+      <div id="dict-learned" style="margin-top:12px;"></div>
+      <details style="margin-top:16px;">
+        <summary>Import / export as text</summary>
+        <p class="muted-note">One word per line. <code>*</code> in front pins it; <code>= a, b</code> lists how it sounds.</p>
+        <textarea id="dict-text" rows="6" style="width:100%;box-sizing:border-box;" placeholder="*Omnihear = omni hear, omni here&#10;Kubernetes"></textarea>
+        <div class="btn-group">
+          <button class="action" id="dict-import" type="button">Import (add)</button>
+          <button class="action" id="dict-replace" type="button">Replace all</button>
+          <a class="action" id="dict-export" href="/api/dictionary/export" download="omnihear-dictionary.txt">Export</a>
+          <span id="dict-imsg" class="p-msg"></span>
+        </div>
+      </details>
+    </div>
+
+    <h2>Snippets</h2>
+    <div class="card" style="margin-bottom:24px;">
+      <p class="muted-note" style="margin-top:0;">Say the trigger phrase on its own and omnihear types the saved text instead.
+        A trigger only fires when it is the whole dictation, so it never goes off mid-sentence.
+        Line breaks are typed as Enter, which sends the message in chat apps.</p>
+      <div class="p-row">
+        <input id="snip-trigger" placeholder="Trigger phrase (e.g. insert my address)" maxlength="100">
+      </div>
+      <textarea id="snip-text" rows="3" style="width:100%;box-sizing:border-box;margin-top:8px;" placeholder="Text to insert"></textarea>
+      <div class="btn-group">
+        <button class="action primary" id="snip-save" type="button">Add snippet</button>
+        <button class="action" id="snip-cancel" type="button" style="display:none">Cancel edit</button>
+        <span id="snip-msg" class="p-msg"></span>
+      </div>
+      <div class="table-container" style="max-height:320px;overflow-y:auto;">
+        <table><thead><tr><th>Say</th><th>Inserts</th><th class="num">Used</th><th></th></tr></thead>
+        <tbody id="snip-rows"></tbody></table>
+      </div>
+    </div>
+
+    <h2>App styles</h2>
+    <div class="card">
+      <p class="muted-note" style="margin-top:0;"><b>Casual</b> drops the final full stop and the automatic capital on the first word.
+        <b>Formal</b> capitalizes sentences and <i>I</i>, and ends with a full stop.
+        <b>Document</b> is Formal, plus spoken lists become lines: <i>&ldquo;first &hellip; second &hellip; finally &hellip;&rdquo;</i> or <i>&ldquo;number one &hellip; number two &hellip;&rdquo;</i> become a numbered list, <i>&ldquo;bullet point &hellip; bullet point &hellip;&rdquo;</i> a bulleted one.
+        Lines are typed with Enter, so only use it for editors and documents, never chat apps. <b>None</b> leaves text as transcribed.</p>
+      <p class="muted-note" id="style-support"></p>
+      <div class="p-row">
+        <label style="flex:1">Every other app<select id="style-default"></select></label>
+      </div>
+      <div class="table-container" style="margin-top:12px;">
+        <table><thead><tr><th>App</th><th>Style</th><th></th></tr></thead>
+        <tbody id="style-rows"></tbody></table>
+      </div>
+      <div class="p-row" style="margin-top:12px;">
+        <input id="style-app" placeholder="App name (e.g. slack, firefox, code)">
+        <select id="style-new"></select>
+        <button class="action" id="style-add" type="button">Set style</button>
+        <span id="style-msg" class="p-msg"></span>
+      </div>
+    </div>
   </section>
 
   <!-- Beta Screen -->
@@ -1371,8 +1480,9 @@ function route() {
   const isLog  = h.startsWith('#/log');
   const isSett = h === '#/settings';
   const isBeta = h === '#/beta';
+  const isPers = h === '#/personal';
   const isWelcome = h.startsWith('#/welcome');
-  ['dashboard','history','log','settings','beta','welcome'].forEach(id => {
+  ['dashboard','history','log','settings','personal','beta','welcome'].forEach(id => {
     const el = document.getElementById('screen-' + id);
     if (el) el.classList.remove('active');
   });
@@ -1380,6 +1490,7 @@ function route() {
   $('#nav-history').classList.toggle('active', isHist || isLog);
   $('#nav-settings').classList.toggle('active', isSett);
   $('#nav-beta').classList.toggle('active', isBeta);
+  $('#nav-personal').classList.toggle('active', isPers);
   $('#nav-welcome').classList.toggle('active', isWelcome);
   if (!isWelcome) { wizStop(); wiz.step = 0; }  // leaving the wizard stops its polling
   if (isWelcome) {
@@ -1388,6 +1499,9 @@ function route() {
   } else if (isBeta) {
     document.getElementById('screen-beta').classList.add('active');
     loadBeta();
+  } else if (isPers) {
+    document.getElementById('screen-personal').classList.add('active');
+    loadPersonal();
   } else if (isLog) {
     document.getElementById('screen-log').classList.add('active');
     const p = hashParams();
@@ -1524,6 +1638,7 @@ async function loadDashboard() {
     [t.avg_cpu_percent ? t.avg_cpu_percent.toFixed(0) + '%' : '–', 'avg cpu'],
     [t.avg_memory_mb ? Math.round(t.avg_memory_mb) + ' MB' : '–', 'avg memory'],
   ].map(([v,l]) => `<div class="tile"><div class="v">${esc(v)}</div><div class="l">${esc(l)}</div></div>`).join('');
+  drawInsights(st.insights);
   drawChart(st.per_day);
   $('#dash-hist').innerHTML = rows.map((r, i) =>
     `<tr class="clickable" data-nav="${esc(logHref(i, '', t.n))}">` +
@@ -1534,6 +1649,26 @@ async function loadDashboard() {
     copyCell(r) +
     `</tr>`
   ).join('') || `<tr><td colspan="5" style="text-align:center;padding:24px;color:var(--text-muted)">No transcriptions yet.</td></tr>`;
+}
+
+function fmtSaved(s) {
+  if (s < 60) return Math.round(s) + ' s';
+  if (s < 3600) return Math.round(s / 60) + ' min';
+  return (s / 3600).toFixed(1) + ' h';
+}
+function drawInsights(ins) {
+  if (!ins) { $('#insight-tiles').innerHTML = ''; $('#insight-apps').textContent = ''; return; }
+  const days = n => n + (n === 1 ? ' day' : ' days');
+  $('#insight-tiles').innerHTML = [
+    [ins.speaking_wpm ? ins.speaking_wpm + ' wpm' : '–', 'speaking speed'],
+    [fmtSaved(ins.time_saved_seconds), `saved vs. typing at ${ins.typing_wpm} wpm`],
+    [days(ins.streak_days), 'current streak'],
+    [days(ins.longest_streak_days), 'longest streak'],
+  ].map(([v,l]) => `<div class="tile"><div class="v">${esc(v)}</div><div class="l">${esc(l)}</div></div>`).join('');
+  const apps = ins.top_apps || [];
+  $('#insight-apps').innerHTML = apps.length
+    ? 'Top apps: ' + apps.map(a => `<b>${esc(a.app)}</b> (${esc(a.words)} words)`).join(', ')
+    : '';
 }
 
 // --- History rows: navigation + copy ---
@@ -1789,7 +1924,8 @@ const LANGUAGES = [['auto','Auto-detect Language']].concat(
 const COMPUTE_TYPES = ['int8','float16','int8_float16','float32'];
 const BOOLS = ['dashboard','notify','beep','history','verbose','vad_filter',
   'condition_on_previous_text','brain','brain_autocorrect','brain_hotwords','analytics',
-  'voice_commands','terminal_commands','rag_context','hands_free'];
+  'voice_commands','terminal_commands','rag_context','hands_free',
+  'chunked_transcription','whisper_mode','code_switching'];
 const NUMBERS = {
   sample_rate: {min: 8000, step: 1000},
   beam_size: {min: 1, step: 1},
@@ -1803,6 +1939,8 @@ const NUMBERS = {
   rag_context_limit: {min: 1, max: 20, step: 1},
   ask_context_limit: {min: 1, max: 20, step: 1},
   max_recording_seconds: {min: 10, max: 3600, step: 10},
+  chunk_seconds: {min: 5, max: 60, step: 1},
+  smart_cleanup_ms: {min: 200, max: 10000, step: 100},
   overlay_scale: {step: 0.1},
   overlay_opacity: {step: 0.05},
   overlay_offset_x: {step: 10},
@@ -1832,11 +1970,13 @@ const OVERLAY_CHOICES = {
 // Beta-only settings: rendered on #/beta, never in #/settings.
 const BETA_KEYS = ['brain','brain_autocorrect','brain_hotwords','brain_min_count','analytics',
   'voice_commands','terminal_commands','rag_context','rag_context_limit',
-  'ask_hotkey','ask_model','ask_context_limit'];
+  'ask_hotkey','ask_context_limit'];
 const SECTIONS = [
   ['Transcription Engine', ['model','language','device','compute_type','beam_size']],
   ['Input & Trigger', ['hotkey','sample_rate','min_duration','type_method']],
   ['Dictation (new)', ['hands_free','max_recording_seconds','paste_last_hotkey','cleanup']],
+  ['Local AI editing (new)', ['command_hotkey','ask_model','cleanup_model','smart_cleanup_ms']],
+  ['Long & quiet dictation (new)', ['chunked_transcription','chunk_seconds','whisper_mode','code_switching']],
   ['Hallucination Filtering', ['vad_filter','no_speech_threshold',
     'log_prob_threshold','compression_ratio_threshold','condition_on_previous_text']],
   ['Dashboard & SQLite DB', ['dashboard','dashboard_port','history']],
@@ -1857,7 +1997,13 @@ const HELP = {
   hands_free: 'Beta. Double-tap the hotkey to keep recording without holding it; tap once more to stop and transcribe.',
   max_recording_seconds: 'Safety cap: recording stops and is transcribed after this many seconds (hands-free or held).',
   paste_last_hotkey: 'Optional key/combo that puts your last transcript at the cursor again, for when it went to the wrong window. Empty disables it.',
-  cleanup: 'Beta. light: remove filler words (um, uh), stutters ("the the") and spoken self-corrections ("at 2, actually 3" becomes "at 3") before typing.',
+  cleanup: 'Beta. light: remove filler words (um, uh), stutters ("the the") and spoken self-corrections ("at 2, actually 3" becomes "at 3") before typing. smart: light, then a local Ollama model fixes grammar and punctuation; if it takes longer than the smart cleanup budget, the light result is typed.',
+  command_hotkey: 'Beta. Command Mode: select text, hold this key/combo, say an edit ("make this shorter", "turn this into bullets"), release. A local Ollama model rewrites the selection in place. With nothing selected it answers like voice Q&A. Empty disables it.',
+  smart_cleanup_ms: 'Time budget for cleanup = smart. If the local model takes longer, the rule-based cleanup is typed instead.',
+  chunked_transcription: 'Beta. Transcribe long dictations in pieces at natural pauses while you are still talking, so text appears sooner after you release.',
+  chunk_seconds: 'Chunked transcription: minimum seconds of audio before cutting at the next pause.',
+  whisper_mode: 'Beta. For speaking quietly: boosts quiet audio and lowers the voice-detection thresholds. The overlay meter is boosted too.',
+  code_switching: 'Beta. With language set to Auto-detect, allow the language to change within one dictation. Off: a long dictation keeps the language detected at its start.',
   vad_filter: 'Trim silence/noise before transcription using Silero VAD. Reduces hallucinated text on quiet clips.',
   no_speech_threshold: 'Segments with a no-speech probability above this are treated as silence, not text.',
   log_prob_threshold: 'Segments whose average log-probability falls below this are considered low-confidence.',
@@ -1880,7 +2026,8 @@ const HELP = {
   rag_context: 'Retrieve relevant past transcriptions (keyword search over history.db) and feed them to Whisper as extra initial_prompt context, alongside Common Brain’s vocabulary.',
   rag_context_limit: 'Max past transcriptions to feed as RAG context.',
   ask_hotkey: 'Second push-to-talk key/combo (e.g. "ctrl_l+space"): hold, ask a question, release to get a locally-generated answer typed instead of the raw transcript. Empty disables it. Requires Ollama installed locally.',
-  ask_model: 'Ollama model name used to generate voice Q&A answers (e.g. "llama3.2"). Ollama must be installed and the model pulled locally.',
+  ask_model: 'Local Ollama model that follows instructions, used by Command Mode and voice Q&A. Default qwen3.5:2b. Install Ollama and run "ollama pull <model>" first.',
+  cleanup_model: 'Local Ollama model for cleanup = smart. The default is a Qwen3.5-2B fine-tuned only for cleaning up dictation (about 1.3 GB). Pull it with: ollama pull hf.co/Muesli-HQ/qwen35-2b-muesli-cleanup-v12-gguf:Q4_K_M'
   ask_context_limit: 'Max past transcriptions retrieved as context for voice Q&A.',
   overlay_scale: 'Overall size of the recording indicator. 1 is the original compact size.',
   overlay_position: 'Where on screen the indicator appears.',
@@ -1897,7 +2044,8 @@ const HELP = {
   overlay_bar_height: 'Height of the tallest waveform bar, before scaling. The container grows to fit.',
   overlay_bar_shape: 'Waveform bars with rounded ends, or square ends.',
 };
-const pretty = k => OVERLAY_LABELS[k] || k.replace(/_/g, ' ');
+const FIELD_LABELS = {ask_model: 'Command Mode / Q&A model (Ollama)', cleanup_model: 'smart cleanup model (Ollama)', smart_cleanup_ms: 'smart cleanup budget (ms)'};
+const pretty = k => OVERLAY_LABELS[k] || FIELD_LABELS[k] || k.replace(/_/g, ' ');
 const prettyOpt = o => o.replace(/_/g, ' ');
 const keyDisplay = hk => String(hk).split('+').filter(Boolean)
   .map(p => KEY_NAMES[p] || p.toUpperCase()).join(' + ');
@@ -1973,7 +2121,7 @@ function codeToName(code, key) {
 
 // Every <button data-capture-key="..."> is a capture field; its value lives
 // in data-value ('' = not set). Optional keys get a Clear button.
-const CAPTURE_KEYS = {hotkey: false, paste_last_hotkey: true, ask_hotkey: true};  // key -> clearable
+const CAPTURE_KEYS = {hotkey: false, paste_last_hotkey: true, ask_hotkey: true, command_hotkey: true};  // key -> clearable
 const hkLabel = v => v ? keyDisplay(v) : 'Not set — click to record';
 
 function captureField(k, v) {
@@ -2381,6 +2529,146 @@ async function loadBeta() {
   $('#beta-cfg').innerHTML = `<div class="cfg-grid">` +
     BETA_KEYS.filter(k => k in cfg).map(k => fieldHtml(k, cfg[k])).join('') + `</div>`;
 }
+
+// --- Personal: dictionary, snippets, app styles ---
+const STYLES = __STYLES__;
+const STYLE_LABEL = {none: 'None', casual: 'Casual', formal: 'Formal', document: 'Document (lists)'};
+const styleOptions = sel => STYLES.map(st =>
+  `<option value="${st}"${st === sel ? ' selected' : ''}>${STYLE_LABEL[st] || st}</option>`).join('');
+const post = (path, body) => api(path, {method: 'POST', body: JSON.stringify(body)});
+let personal = null;
+let snipEditing = null;
+
+async function loadPersonal() {
+  personal = await api('/api/personal');
+  if (personal.error) {
+    $('#dict-rows').innerHTML = `<tr><td colspan="4" class="muted-note">${esc(personal.error)}</td></tr>`;
+    return;
+  }
+  const empty = (n, msg) => `<tr><td colspan="${n}" style="text-align:center;padding:16px;color:var(--text-muted)">${msg}</td></tr>`;
+  $('#dict-rows').innerHTML = personal.dictionary.map(w =>
+    `<tr><td style="font-weight:600">${esc(w.word)}</td>` +
+    `<td>${esc(w.sounds_like.join(', '))}</td>` +
+    `<td><label class="check" style="margin:0"><input type="checkbox" data-dict-pin="${esc(w.word)}"${w.pinned ? ' checked' : ''}><span class="sr-only">Pinned</span><div class="switch-slider"></div></label></td>` +
+    `<td class="num"><button class="pag-btn" type="button" data-dict-del="${esc(w.word)}" title="Remove">✕</button></td></tr>`
+  ).join('') || empty(4, 'No words yet.');
+  const learned = personal.learned || [];
+  $('#dict-learned').innerHTML = learned.length
+    ? `<span class="muted-note" style="margin:0 8px 0 0">Learned by Common Brain:</span>` +
+      learned.map(w => `<button class="pag-btn learned-chip" type="button" data-dict-learn="${esc(w)}" title="Add to dictionary">+ ${esc(w)}</button>`).join('')
+    : '';
+  $('#snip-rows').innerHTML = personal.snippets.map(sn =>
+    `<tr><td style="font-weight:600">${esc(sn.trigger)}</td>` +
+    `<td><div class="p-pre t-clip">${esc(sn.text)}</div></td>` +
+    `<td class="num">${esc(sn.uses)}</td>` +
+    `<td class="num" style="white-space:nowrap"><button class="pag-btn" type="button" data-snip-edit="${sn.id}" title="Edit">✎</button> ` +
+    `<button class="pag-btn" type="button" data-snip-del="${sn.id}" title="Delete">✕</button></td></tr>`
+  ).join('') || empty(4, 'No snippets yet.');
+  $('#style-support').textContent = personal.focus_supported
+    ? 'omnihear detects the app you are dictating into. Apps you have dictated into are listed below.'
+    : 'This session cannot tell which app has focus (Wayland has no portable way, and X11 needs xdotool), so the "every other app" style is used everywhere.';
+  $('#style-default').innerHTML = styleOptions(personal.styles['*'] || 'none');
+  $('#style-new').innerHTML = styleOptions('casual');
+  const apps = Array.from(new Set([...Object.keys(personal.styles).filter(a => a !== '*'), ...personal.apps])).sort();
+  $('#style-rows').innerHTML = apps.map(a => {
+    const st = personal.styles[a];
+    return `<tr><td>${esc(a)}</td><td><select data-style-app="${esc(a)}">` +
+      `<option value=""${st ? '' : ' selected'}>Default</option>${st ? styleOptions(st) : styleOptions('')}</select></td>` +
+      `<td class="num">${st ? `<button class="pag-btn" type="button" data-style-clear="${esc(a)}" title="Use default">✕</button>` : ''}</td></tr>`;
+  }).join('') || empty(3, 'No apps seen yet. Dictate into an app, or add one by name below.');
+}
+
+function pMsg(sel, res, ok) {
+  betaMsg(sel, res && res.error ? res.error : ok);
+}
+
+$('#dict-add').addEventListener('click', async () => {
+  const word = $('#dict-word').value.trim();
+  if (!word) return;
+  const res = await post('/api/dictionary', {word, sounds_like: $('#dict-alias').value, pinned: $('#dict-pin').checked});
+  pMsg('#dict-msg', res, `Added “${word}”.`);
+  if (!res.error) { $('#dict-word').value = ''; $('#dict-alias').value = ''; $('#dict-pin').checked = false; }
+  loadPersonal();
+});
+$('#dict-word').addEventListener('keydown', e => { if (e.key === 'Enter') $('#dict-add').click(); });
+async function dictImport(replace) {
+  const text = $('#dict-text').value;
+  if (!text.trim()) return;
+  if (replace && !confirm('Replace your whole dictionary with this list?')) return;
+  const res = await post('/api/dictionary/import', {text, replace});
+  pMsg('#dict-imsg', res, `Imported ${res.added} word(s)` + (res.errors && res.errors.length ? ` — skipped: ${res.errors.join('; ')}` : '.'));
+  loadPersonal();
+}
+$('#dict-import').addEventListener('click', () => dictImport(false));
+$('#dict-replace').addEventListener('click', () => dictImport(true));
+
+function snipReset() {
+  snipEditing = null;
+  $('#snip-trigger').value = ''; $('#snip-text').value = '';
+  $('#snip-save').textContent = 'Add snippet';
+  $('#snip-cancel').style.display = 'none';
+}
+$('#snip-cancel').addEventListener('click', snipReset);
+$('#snip-save').addEventListener('click', async () => {
+  const body = {trigger: $('#snip-trigger').value, text: $('#snip-text').value};
+  if (snipEditing !== null) body.id = snipEditing;
+  const res = await post('/api/snippets', body);
+  pMsg('#snip-msg', res, 'Saved.');
+  if (!res.error) snipReset();
+  loadPersonal();
+});
+
+$('#style-default').addEventListener('change', async e => {
+  const res = await post('/api/app-style', {app: '*', style: e.target.value});
+  pMsg('#style-msg', res, 'Saved.');
+});
+$('#style-add').addEventListener('click', async () => {
+  const app = $('#style-app').value.trim();
+  if (!app) return;
+  const res = await post('/api/app-style', {app, style: $('#style-new').value});
+  pMsg('#style-msg', res, 'Saved.');
+  if (!res.error) $('#style-app').value = '';
+  loadPersonal();
+});
+
+$('#screen-personal').addEventListener('click', async e => {
+  const t = e.target.closest('button');
+  if (!t) return;
+  if (t.dataset.dictDel !== undefined) {
+    await post('/api/dictionary', {word: t.dataset.dictDel, delete: true});
+  } else if (t.dataset.dictLearn !== undefined) {
+    await post('/api/dictionary', {word: t.dataset.dictLearn});
+  } else if (t.dataset.snipDel !== undefined) {
+    if (!confirm('Delete this snippet?')) return;
+    await post('/api/snippets', {id: +t.dataset.snipDel, delete: true});
+    if (snipEditing === +t.dataset.snipDel) snipReset();
+  } else if (t.dataset.snipEdit !== undefined) {
+    const sn = personal.snippets.find(x => x.id === +t.dataset.snipEdit);
+    if (!sn) return;
+    snipEditing = sn.id;
+    $('#snip-trigger').value = sn.trigger; $('#snip-text').value = sn.text;
+    $('#snip-save').textContent = 'Save changes';
+    $('#snip-cancel').style.display = '';
+    $('#snip-trigger').focus();
+    return;
+  } else if (t.dataset.styleClear !== undefined) {
+    await post('/api/app-style', {app: t.dataset.styleClear, style: ''});
+  } else {
+    return;
+  }
+  loadPersonal();
+});
+$('#screen-personal').addEventListener('change', async e => {
+  const t = e.target;
+  if (t.dataset.dictPin !== undefined) {
+    const w = personal.dictionary.find(x => x.word === t.dataset.dictPin);
+    if (w) await post('/api/dictionary', {word: w.word, sounds_like: w.sounds_like, pinned: t.checked});
+    loadPersonal();
+  } else if (t.dataset.styleApp !== undefined) {
+    await post('/api/app-style', {app: t.dataset.styleApp, style: t.value});
+    loadPersonal();
+  }
+});
 
 const betaMsgTimers = {};
 function betaMsg(sel, text) {
@@ -2861,7 +3149,8 @@ def _overlay_js_consts() -> dict:
 
 
 class DashboardHandler(BaseHTTPRequestHandler):
-    # set on the server: server.db, server.status_fn, server.brain, server.cfg
+    # set on the server: server.db, server.status_fn, server.brain,
+    # server.personal, server.cfg
 
     def log_message(self, *args):
         pass
@@ -2902,6 +3191,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     .replace("__CLEANUP_LEVELS__",
                              json.dumps(list(config_mod.CLEANUP_LEVELS)))
                     .replace("__PLATFORM__", json.dumps(sys.platform))
+                    .replace("__STYLES__", json.dumps(list(personal_mod.STYLES)))
                     .replace("__OVERLAY__", json.dumps(_overlay_js_consts()))
                     .replace("__TYPE_METHODS__",
                              json.dumps(["auto", "pynput", "paste"]
@@ -2940,7 +3230,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
                                             "avg_memory_mb": 0},
                                  "per_day": []})
             else:
-                self._send(200, db.stats())
+                st = db.stats()
+                st["insights"] = db.insights()
+                self._send(200, st)
         elif url.path == "/api/config":
             self._send(200, config_mod.load_config())
         elif url.path == "/api/brain":
@@ -2951,6 +3243,33 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 out.update(stats=brain.stats(), words=brain.list_words(),
                            corrections=brain.list_corrections())
             self._send(200, out)
+        elif url.path == "/api/personal":
+            personal = getattr(self.server, "personal", None)
+            if personal is None:
+                self._send(200, {"error": "Personalization needs history "
+                                          "(it is stored in history.db)."})
+                return
+            from . import focus
+            brain = getattr(self.server, "brain", None)
+            mine = {w["word"].lower() for w in personal.list_words()}
+            learned = []
+            if brain is not None:
+                learned = [w["word"] for w in brain.list_words(60)
+                           if w["word"].lower() not in mine][:20]
+            self._send(200, {
+                "dictionary": personal.list_words(),
+                "snippets": personal.list_snippets(),
+                "styles": personal.styles(),
+                "apps": db.recent_apps() if db is not None else [],
+                "focus_supported": focus.supported(),
+                "learned": learned,
+            })
+        elif url.path == "/api/dictionary/export":
+            personal = getattr(self.server, "personal", None)
+            text = personal.export_text() if personal is not None else ""
+            self._send(200, text.encode(), "text/plain; charset=utf-8",
+                       headers=(("Content-Disposition",
+                                 'attachment; filename="omnihear-dictionary.txt"'),))
         elif url.path == "/api/auth/status":
             from . import cloud
             self._send(200, cloud.status())
@@ -3068,6 +3387,16 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 return
             brain.delete_correction(body["id"])
             self._send(200, {"ok": True})
+        elif url.path in ("/api/dictionary", "/api/dictionary/import",
+                          "/api/snippets", "/api/app-style"):
+            body = self._json_body()
+            if body is None:
+                return
+            personal = getattr(self.server, "personal", None)
+            if personal is None:
+                self._send(400, {"error": "personalization needs history enabled"})
+                return
+            self._send(200, _personal_post(personal, url.path, body))
         elif url.path == "/api/feedback":
             body = self._json_body()
             if body is None:
@@ -3110,7 +3439,51 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._send(404, {"error": "not found"})
 
 
-def start_dashboard(db, status_fn, port: int = 4738, brain=None, cfg=None):
+def _personal_post(personal, path: str, body: dict) -> dict:
+    """Dictionary / snippet / app-style edits. Errors come back as
+    {"error": ...} with HTTP 200 so the page can show them inline."""
+    def done(err=None):
+        return {"error": err} if err else {"ok": True}
+
+    if path == "/api/dictionary":
+        word = body.get("word")
+        if not isinstance(word, str) or not word.strip():
+            return done("word is empty")
+        if body.get("delete"):
+            personal.delete_word(word)
+            return done()
+        return done(personal.add_word(word, body.get("sounds_like") or (),
+                                      bool(body.get("pinned"))))
+    if path == "/api/dictionary/import":
+        text = body.get("text")
+        if not isinstance(text, str):
+            return done("text is missing")
+        return personal.import_text(text, replace=bool(body.get("replace")))
+    if path == "/api/snippets":
+        sid = body.get("id")
+        if sid is not None and (not isinstance(sid, int) or isinstance(sid, bool)):
+            return done("bad id")
+        if body.get("delete"):
+            if sid is None:
+                return done("bad id")
+            personal.delete_snippet(sid)
+            return done()
+        trigger, text = body.get("trigger"), body.get("text")
+        if not isinstance(trigger, str) or not isinstance(text, str):
+            return done("trigger and text are required")
+        return done(personal.save_snippet(trigger, text, sid))
+    # /api/app-style -- an empty style removes the app's own setting.
+    app, style = body.get("app"), body.get("style")
+    if not isinstance(app, str) or not isinstance(style, str):
+        return done("app and style are required")
+    if not style:
+        personal.clear_style(app)
+        return done()
+    return done(personal.set_style(app, style))
+
+
+def start_dashboard(db, status_fn, port: int = 4738, brain=None, cfg=None,
+                    personal=None):
     """Start the dashboard server on 127.0.0.1 in a daemon thread.
 
     cfg is the running process's effective config (CLI flags applied), for
@@ -3126,6 +3499,7 @@ def start_dashboard(db, status_fn, port: int = 4738, brain=None, cfg=None):
     server.db = db
     server.status_fn = status_fn
     server.brain = brain
+    server.personal = personal
     server.cfg = cfg
     threading.Thread(target=server.serve_forever, daemon=True).start()
     print(f"omnihear: dashboard at http://127.0.0.1:{port}")

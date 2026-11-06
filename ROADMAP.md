@@ -17,12 +17,12 @@ and Linux (X11 and Wayland), Windows and macOS all keep working.
 | Insertion | Clipboard paste, restores clipboard | Typing, or clipboard paste with restore (beta) | Built (1.10) |
 | Live "Flow bar" with mic level | Yes | Yes: live waveform, spinner while transcribing, no-signal warning | Done (1.9.0) |
 | Filler-word removal, self-corrections ("2pm, actually 3") | AI auto-edit (cloud) | Rule-based cleanup, English (beta) | Built (1.10); local LLM in Phase 3 |
-| Personal dictionary | Auto-learned + manual | Common Brain (auto, beta) | Phase 2: manual UI |
-| Snippets (voice shortcuts) | Yes | No | Phase 2 |
-| Per-app tone/style | Yes | No | Phase 2 |
-| Command Mode (select text, speak an edit) | Yes (cloud LLM) | Voice Q&A only (Ollama) | Phase 3 |
-| Whispering / quiet speech | Yes | No | Phase 3 |
-| Stats (WPM, time saved, streaks) | Yes | Words/day, latency, CPU/RAM | Phase 2 |
+| Personal dictionary | Auto-learned + manual | Manual dictionary + Common Brain (auto, beta) | Built (1.11) |
+| Snippets (voice shortcuts) | Yes | Yes | Built (1.11) |
+| Per-app tone/style | Yes | Rule-based (X11, Windows, macOS) | Built (1.11) |
+| Command Mode (select text, speak an edit) | Yes (cloud LLM) | Yes, local Ollama (beta) | Built (1.12) |
+| Whispering / quiet speech | Yes | Whisper mode (beta) | Built (1.12) |
+| Stats (WPM, time saved, streaks) | Yes | WPM, time saved, streaks, top apps | Built (1.11) |
 | Guided onboarding + permission checks | Yes | Dashboard setup wizard + `--doctor` | Built (1.10) |
 | Privacy | Cloud, with a zero-retention option | Fully local | Our edge, keep it |
 | Linux / Wayland | No | Yes | Our edge, harden it (Phase 0, 4) |
@@ -183,7 +183,24 @@ user-facing summary.
 
 ---
 
-## Phase 2: Personalization (1.11)
+## Phase 2: Personalization (1.11, built on this branch)
+
+Built in `personal.py` (dictionary, snippets, styles), `focus.py`
+(focused-app detection) and `db.insights()`, on the dashboard's Personal
+tab. Notes on what shipped vs. the plan below:
+- The dictionary is its own `dictionary` table (word, spoken forms,
+  pinned), not the Brain's `vocab` table, so it works without the beta
+  sign-in. Hints merge dictionary words (pinned first) with Brain words.
+- Post-correction is stdlib: listed spoken forms, exact-spelling and
+  split-word matching, plus the metaphone sound-alike pass.
+- Styles and app overrides live in an `app_styles` table (`*` = default)
+  rather than `config.toml`, so changing them needs no restart.
+- The focused app is probed on a thread while Whisper runs (no added
+  latency) and stored in `transcriptions.app` for Insights.
+- Spoken-list → bullets is the `document` style (Formal plus
+  `personal.format_lists()`): ordinals at a clause start, "number/step N"
+  and "bullet point" markers; two or more items in order, otherwise the
+  text is left alone.
 
 1. **Personal dictionary UI.** Add, remove and pin words. Merge them with
    Common Brain's learned terms, feed them to `hotwords` / `initial_prompt`,
@@ -207,7 +224,32 @@ user-facing summary.
 
 ---
 
-## Phase 3: Local AI editing (1.12)
+## Phase 3: Local AI editing (1.12, built on this branch)
+
+Built and beta, off by default. Notes on what shipped vs. the plan below:
+- `llm.py` talks to Ollama's **HTTP API** on localhost (urllib) rather than
+  the `ollama run` CLI that `qna.py` uses: smart cleanup needs a hard
+  timeout, and the API can pre-load the model (`keep_alive`) when a
+  recording starts. A non-local `OLLAMA_HOST` is refused.
+- Command Mode reads the selection the same way on every platform: put a
+  marker on the clipboard, send the copy key (Ctrl+Insert on Linux, which
+  terminals honour too), read the clipboard back, restore it. No
+  selection → voice Q&A. Ollama missing → nothing is typed over the
+  selection.
+- Smart cleanup runs the light rules first, then the LLM, and rejects
+  answers that don't look like a light edit (length and word-overlap
+  checks).
+- Chunking runs on the audio thread (it must never take `_hk_lock`) and
+  queues tagged `("chunk", gen, audio, duration)` jobs on the existing
+  worker; the final `("transcribe", audio|None, duration, mode, gen)` job
+  joins the chunk texts and runs the normal pipeline once.
+- Models: smart cleanup defaults to Muesli's Qwen3.5-2B dictation-cleanup
+  fine-tune (Q4_K_M GGUF, ~1.3 GB, pulled from Hugging Face through
+  Ollama) in its exact raw training format; Command Mode and Q&A default
+  to the general `qwen3.5:2b`. Chosen for speed, then RAM, then precision.
+  `think: false` keeps Qwen3.5 from spending the budget reasoning.
+- Whisper mode's overlay hint is a boosted meter, not a separate state, so
+  the three overlay renderers didn't need changes.
 
 1. **Command Mode.** Select text, hold the command hotkey, and say "make this
    shorter" or "turn this into bullets". omnihear grabs the selection (X11

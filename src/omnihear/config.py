@@ -72,7 +72,7 @@ OVERLAY_COLOR_KEYS = ("overlay_bg_color", "overlay_bar_color", "overlay_dot_colo
 
 
 # Text cleanup levels applied to dictation (see cleanup.py).
-CLEANUP_LEVELS = ("off", "light")
+CLEANUP_LEVELS = ("off", "light", "smart")  # smart = light + local LLM polish (llm.py)
 
 
 def hotkey_display(name: str) -> str:
@@ -176,8 +176,18 @@ DEFAULTS = {
     "rag_context": False,
     "rag_context_limit": 3,
     "ask_hotkey": "",
-    "ask_model": "llama3.2",
+    "ask_model": "qwen3.5:2b",    # Command Mode + voice Q&A (llm.DEFAULT_ASSIST_MODEL)
     "ask_context_limit": 5,
+    # Local AI editing (1.12, beta; llm.py talks to a local Ollama).
+    "command_hotkey": "",          # hold, speak an edit for the selected text
+    "smart_cleanup_ms": 1500,      # cleanup = "smart": LLM time budget
+    # cleanup = "smart" model: Muesli's dictation-cleanup fine-tune of
+    # Qwen3.5-2B (llm.DEFAULT_CLEANUP_MODEL).
+    "cleanup_model": "hf.co/Muesli-HQ/qwen35-2b-muesli-cleanup-v12-gguf:Q4_K_M",
+    "chunked_transcription": False,  # transcribe long dictations at pauses
+    "chunk_seconds": 10,           # min audio per chunk before cutting
+    "whisper_mode": False,         # quiet-speech profile
+    "code_switching": False,       # language = auto: allow mid-dictation switches
     # Recording overlay look and placement (see overlay_anim.Style).
     "overlay_scale": 1.5,
     "overlay_position": "bottom_center",
@@ -359,18 +369,25 @@ def validate_updates(updates: dict) -> tuple[dict, list[str]]:
             and not 10 <= clean["max_recording_seconds"] <= 3600):
         errors.append("max_recording_seconds must be between 10 and 3600")
         del clean["max_recording_seconds"]
-    if "ask_hotkey" in clean:
-        v = clean["ask_hotkey"].strip()
+    for key in ("ask_hotkey", "command_hotkey"):
+        if key not in clean:
+            continue
+        v = clean[key].strip()
         if not v:
-            clean["ask_hotkey"] = ""  # empty disables voice Q&A
+            clean[key] = ""  # empty disables the feature
         else:
             hk = validate_hotkey(v)
             if hk:
-                clean["ask_hotkey"] = hk
+                clean[key] = hk
             else:
-                errors.append("ask_hotkey must be known key names or single "
+                errors.append(f"{key} must be known key names or single "
                               "characters, joined with '+' for combos")
-                del clean["ask_hotkey"]
+                del clean[key]
+    for key, lo, hi in (("chunk_seconds", 5, 60),
+                        ("smart_cleanup_ms", 200, 10000)):
+        if key in clean and not lo <= clean[key] <= hi:
+            errors.append(f"{key} must be between {lo} and {hi}")
+            del clean[key]
     for key in ("dashboard_port", "sample_rate", "beam_size"):
         if key in clean and clean[key] <= 0:
             errors.append(f"{key} must be positive")

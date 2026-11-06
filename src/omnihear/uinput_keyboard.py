@@ -176,6 +176,13 @@ class VirtualKeyboard:
             fd = self._ensure()
             self._tap(fd, KEY_INSERT, KEY_LEFTSHIFT)
 
+    def copy_chord(self) -> None:
+        """Ctrl+Insert, the copy counterpart of Shift+Insert (Command Mode
+        reads the selection with it)."""
+        with self._lock:
+            fd = self._ensure()
+            self._tap(fd, KEY_INSERT, KEY_LEFTCTRL)
+
 
 _default: VirtualKeyboard | None = None
 _default_lock = threading.Lock()

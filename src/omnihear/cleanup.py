@@ -466,9 +466,10 @@ def _tidy(out, original):
 
 
 def clean(text: str, level: str = "light", language: str | None = None) -> str:
-    """Tidy a transcript before it's typed. level "off" (or anything but
-    "light") returns text unchanged, as does a non-English `language`."""
-    if (level != "light" or not text
+    """Tidy a transcript before it's typed. level "light" (or "smart", whose
+    LLM pass runs afterwards in app.py) applies the rules; anything else
+    returns text unchanged, as does a non-English `language`."""
+    if (level not in ("light", "smart") or not text
             or (language and not language.lower().startswith("en"))):
         return text
     prefix, toks = _tokenize(text)

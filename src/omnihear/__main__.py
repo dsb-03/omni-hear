@@ -42,7 +42,8 @@ def build_parser(cfg: dict) -> argparse.ArgumentParser:
                    choices=list(config_mod.CLEANUP_LEVELS),
                    help="Clean up dictation before typing (beta): 'light' "
                         "removes filler words (um, uh), stutters and "
-                        "spoken self-corrections.")
+                        "spoken self-corrections; 'smart' adds a local "
+                        "Ollama grammar pass within smart_cleanup_ms.")
     p.add_argument("--sample-rate", type=int, default=cfg["sample_rate"],
                    help="Audio sample rate in Hz.")
     p.add_argument("--type-method", default=cfg["type_method"],
@@ -105,6 +106,29 @@ def build_parser(cfg: dict) -> argparse.ArgumentParser:
                    default=cfg["ask_context_limit"],
                    help="Max past transcriptions retrieved as context for "
                         "voice Q&A.")
+    p.add_argument("--command-hotkey", default=cfg["command_hotkey"],
+                   help="Optional push-to-talk key/combo for Command Mode "
+                        "(beta): select text, hold, say an edit (\"make this "
+                        "shorter\"), release; a local Ollama model rewrites "
+                        "the selection. Empty disables it.")
+    p.add_argument("--chunked-transcription", dest="chunked_transcription",
+                   action="store_true", default=cfg["chunked_transcription"],
+                   help="Transcribe long dictations in chunks at pauses while "
+                        "still recording (beta).")
+    p.add_argument("--no-chunked-transcription", dest="chunked_transcription",
+                   action="store_false", help="Disable chunked transcription.")
+    p.add_argument("--whisper-mode", dest="whisper_mode", action="store_true",
+                   default=cfg["whisper_mode"],
+                   help="Quiet-speech profile (beta): more gain, lower "
+                        "voice-detection thresholds.")
+    p.add_argument("--no-whisper-mode", dest="whisper_mode",
+                   action="store_false", help="Disable whisper mode.")
+    p.add_argument("--code-switching", dest="code_switching",
+                   action="store_true", default=cfg["code_switching"],
+                   help="With --language auto, allow switching language "
+                        "within one dictation (beta).")
+    p.add_argument("--no-code-switching", dest="code_switching",
+                   action="store_false", help="Disable code-switching.")
     p.add_argument("--analytics", dest="analytics", action="store_true",
                    default=cfg["analytics"],
                    help="Opt in to anonymous usage pings (version/platform "
@@ -113,6 +137,13 @@ def build_parser(cfg: dict) -> argparse.ArgumentParser:
                    default=cfg["verbose"],
                    help="Print per-transcription output to the terminal "
                         "(recording, queued audio, transcribed text).")
+    p.add_argument("--cleanup-model", default=cfg["cleanup_model"],
+                   help="Ollama model for --cleanup smart (default: a "
+                        "dictation-cleanup fine-tune of Qwen3.5-2B).")
+    p.add_argument("--bench-llm", nargs="*", metavar="MODEL",
+                   help="Time local Ollama models on sample dictations and "
+                        "exit (default: the configured cleanup and "
+                        "Command Mode models).")
     p.add_argument("--doctor", action="store_true",
                    help="Check this machine's setup (session, hotkey and "
                         "typing permissions, audio, model deps), print fixes, "
@@ -151,6 +182,12 @@ def main():
         from . import doctor
         sys.exit(doctor.main(cfg))
 
+    if args.bench_llm is not None:
+        from . import llm
+        models = args.bench_llm or list(dict.fromkeys(
+            [cfg["cleanup_model"], cfg["ask_model"]]))
+        sys.exit(llm.bench(models))
+
     if args.list_devices:
         from .app import list_devices
         list_devices()
@@ -168,8 +205,13 @@ def main():
         from .brain import Brain
         brain = Brain(db, min_count=cfg["brain_min_count"])
 
+    personal = None
+    if db is not None:
+        from .personal import Personal
+        personal = Personal(db)
+
     feedback = Feedback(notify_enabled=cfg["notify"], beep_enabled=cfg["beep"])
-    app = App(cfg, db=db, feedback=feedback, brain=brain)
+    app = App(cfg, db=db, feedback=feedback, brain=brain, personal=personal)
 
     # Opt-in daily usage ping (no-op unless analytics on + signed in).
     import threading as _threading
@@ -179,7 +221,7 @@ def main():
     if cfg["dashboard"]:
         from .dashboard import start_dashboard
         if start_dashboard(db, app.status, port=cfg["dashboard_port"],
-                           brain=brain, cfg=cfg) is None:
+                           brain=brain, cfg=cfg, personal=personal) is None:
             # Port already bound: almost certainly another omnihear instance.
             # Two instances both hear the hotkey and both type, interleaving
             # their output — exit instead.
