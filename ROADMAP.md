@@ -197,7 +197,10 @@ tab. Notes on what shipped vs. the plan below:
   rather than `config.toml`, so changing them needs no restart.
 - The focused app is probed on a thread while Whisper runs (no added
   latency) and stored in `transcriptions.app` for Insights.
-- Spoken-list → bullets is not built yet.
+- Spoken-list → bullets is the `document` style (Formal plus
+  `personal.format_lists()`): ordinals at a clause start, "number/step N"
+  and "bullet point" markers; two or more items in order, otherwise the
+  text is left alone.
 
 1. **Personal dictionary UI.** Add, remove and pin words. Merge them with
    Common Brain's learned terms, feed them to `hotwords` / `initial_prompt`,

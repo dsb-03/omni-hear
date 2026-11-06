@@ -69,9 +69,9 @@ Dictation) or `config.toml`.
     phrase with one word changed). "That was, actually, quite good" stays
     as is.
   - English only.
-  - Spoken lists are *not* turned into bullets yet: a typed newline is
-    Enter, which sends the message in chat apps. Moved to per-app styles
-    (1.11).
+  - Spoken lists are turned into bullets by the per-app Document style
+    (1.11), not here: a typed newline is Enter, which sends the message in
+    chat apps.
 - [x] **First-run setup wizard** in the dashboard (Setup tab, opens by
   itself the first time). Three steps:
   1. The `--doctor` checks, with copy buttons for every fix command.
@@ -102,11 +102,18 @@ history on.
   to type a saved block of text. Only the whole dictation triggers it, so
   it never fires mid-sentence. History keeps what you said.
 - [x] **Per-app styles**: None, Casual (no final full stop, no automatic
-  capital) or Formal (capitalized sentences and "I", final full stop), per
-  app plus a default for every other app. The app is detected on X11 (needs
-  xdotool), Windows and macOS; on Wayland the default style applies.
+  capital), Formal (capitalized sentences and "I", final full stop) or
+  Document (see below), per app plus a default for every other app. The
+  app is detected on X11 (needs xdotool), Windows and macOS; on Wayland
+  the default style applies.
 - [x] **Insights**: speaking speed, time saved vs. typing at 40 wpm,
   current and longest daily streak, and top apps.
+- [x] **Spoken lists → bullets** (the Document style): "first …, second
+  …, finally …" or "number one … number two …" becomes a numbered list,
+  "bullet point … bullet point …" a bulleted one. Needs two or more items
+  in order, and the list has to start a clause, so "the first time" or
+  "I was number one in the class" stay prose. Lines are typed with Enter,
+  so set it only for editors and documents, not chat apps.
 
 ### Built in this branch (1.12, Local AI editing, beta)
 
@@ -142,12 +149,6 @@ omnihear only talks to a local Ollama and refuses a non-local
 - [x] **Language switching** (`code_switching`, with language = auto):
   Whisper may change language within one dictation. Without it, a chunked
   dictation keeps the language detected in its first chunk.
-
-### Planned
-
-**Still to do from 1.11**
-- [ ] **Spoken lists → bullets** as a per-app style, for apps where Enter
-  doesn't send.
 
 
 ## Other improvements

@@ -1251,7 +1251,9 @@ kbd.keycap {
     <h2>App styles</h2>
     <div class="card">
       <p class="muted-note" style="margin-top:0;"><b>Casual</b> drops the final full stop and the automatic capital on the first word.
-        <b>Formal</b> capitalizes sentences and <i>I</i>, and ends with a full stop. <b>None</b> leaves text as transcribed.</p>
+        <b>Formal</b> capitalizes sentences and <i>I</i>, and ends with a full stop.
+        <b>Document</b> is Formal, plus spoken lists become lines: <i>&ldquo;first &hellip; second &hellip; finally &hellip;&rdquo;</i> or <i>&ldquo;number one &hellip; number two &hellip;&rdquo;</i> become a numbered list, <i>&ldquo;bullet point &hellip; bullet point &hellip;&rdquo;</i> a bulleted one.
+        Lines are typed with Enter, so only use it for editors and documents, never chat apps. <b>None</b> leaves text as transcribed.</p>
       <p class="muted-note" id="style-support"></p>
       <div class="p-row">
         <label style="flex:1">Every other app<select id="style-default"></select></label>
@@ -2529,7 +2531,7 @@ async function loadBeta() {
 
 // --- Personal: dictionary, snippets, app styles ---
 const STYLES = __STYLES__;
-const STYLE_LABEL = {none: 'None', casual: 'Casual', formal: 'Formal'};
+const STYLE_LABEL = {none: 'None', casual: 'Casual', formal: 'Formal', document: 'Document (lists)'};
 const styleOptions = sel => STYLES.map(st =>
   `<option value="${st}"${st === sel ? ' selected' : ''}>${STYLE_LABEL[st] || st}</option>`).join('');
 const post = (path, body) => api(path, {method: 'POST', body: JSON.stringify(body)});

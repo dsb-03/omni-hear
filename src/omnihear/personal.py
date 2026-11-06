@@ -21,7 +21,9 @@ from datetime import datetime
 
 from .brain import _match_case, _metaphone
 
-STYLES = ("none", "casual", "formal")
+# "document" = formal + spoken lists as bullets/numbered lines. Only for
+# apps where Enter doesn't send (a list is typed with newlines).
+STYLES = ("none", "casual", "formal", "document")
 DEFAULT_APP = "*"  # app_styles row used when the app has no style of its own
 
 MAX_WORD = 100
@@ -83,12 +85,88 @@ _I_WORDS = {"i", "i'm", "i'll", "i've", "i'd"}
 _SENTENCE_START_RE = re.compile(r"([.!?]\s+)([a-z])")
 
 
+# -- spoken lists ---------------------------------------------------------
+
+_ORDINALS = ["first", "second", "third", "fourth", "fifth", "sixth",
+             "seventh", "eighth", "ninth", "tenth"]
+_NUMBERS = ["one", "two", "three", "four", "five", "six", "seven", "eight",
+            "nine", "ten"]
+# A bare ordinal ("first", "finally") only counts at the start of a clause
+# -- after the start of the text, punctuation, or "and" -- so "the first
+# time" and "wait a second" never start a list. Explicit markers ("number
+# two", "step two", "bullet point") may follow on mid-sentence, but the
+# list's first marker must still start a clause ("I was number one in
+# the class" is prose).
+_CLAUSE = r"(?:^|(?<=[.,;:!?]\s)|(?<=\band\s))"
+_MARKER_RE = re.compile(
+    r"(?P<m>" + _CLAUSE + r"(?:(?P<ord>" + "|".join(_ORDINALS) + r")(?:ly)?"
+    r"(?:\s+of\s+all)?|(?P<last>finally|lastly))"
+    r"|\b(?:number|step)\s+(?P<num>" + "|".join(_NUMBERS) + r")"
+    r"|\b(?P<bullet>(?:next\s+)?bullet(?:\s+point)?))"
+    r"\b[,:]?\s*",
+    re.IGNORECASE)
+_ITEM_TAIL_RE = re.compile(r"[\s,;:.]*(?:\b(?:and|then)\b)?[\s,;:.]*$",
+                           re.IGNORECASE)
+
+
+def _item(text: str) -> str:
+    text = _ITEM_TAIL_RE.sub("", text.strip()).strip()
+    return text[:1].upper() + text[1:]
+
+
+def format_lists(text: str) -> str:
+    """Turn a dictated list into lines: "first ..., second ..., finally ..."
+    or "number one ... number two ..." becomes a numbered list, "bullet
+    point ... bullet point ..." a "- " list. Needs at least two items in
+    order; anything else is returned unchanged."""
+    marks = list(_MARKER_RE.finditer(text))
+    if len(marks) < 2:
+        return text
+    bullets = all(m.group("bullet") for m in marks)
+    run = []
+    def at_clause(m):
+        return re.search(_CLAUSE + r"$", text[:m.start()]) is not None
+    if bullets:
+        run = marks if at_clause(marks[0]) else []
+    else:
+        for m in marks:
+            k = len(run)
+            word = m.group("ord") or m.group("num")
+            if word:
+                idx = (_ORDINALS if m.group("ord") else _NUMBERS).index(word.lower())
+                if idx != k or (k == 0 and not at_clause(m)):
+                    if run:
+                        break
+                    continue  # the list hasn't started yet
+                run.append(m)
+            elif m.group("last") and k >= 2:
+                run.append(m)
+                break
+            elif run:
+                break
+    if len(run) < 2:
+        return text
+    items = []
+    for i, m in enumerate(run):
+        end = run[i + 1].start() if i + 1 < len(run) else len(text)
+        item = _item(text[m.end():end])
+        if not item:
+            return text  # an empty item: probably not a list after all
+        items.append(item)
+    lead = _ITEM_TAIL_RE.sub("", text[:run[0].start()]).strip()
+    lines = [f"- {it}" if bullets else f"{i}. {it}"
+             for i, it in enumerate(items, 1)]
+    return (lead + ":\n" if lead else "") + "\n".join(lines)
+
+
 def apply_style(text: str, style: str, keep=()) -> str:
     """Rule-based tone. `keep` holds words (dictionary entries) whose case
     must never be touched."""
-    if not text or style not in ("casual", "formal"):
+    if not text or style not in ("casual", "formal", "document"):
         return text
     keep_l = {k.lower() for k in keep}
+    if style == "document":
+        return format_lists(apply_style(text, "formal", keep))
     if style == "formal":
         text = re.sub(r"(?<![\w'])(i)(?=(?:'(?:m|ll|ve|d))?(?![\w']))",
                       "I", text)
@@ -357,6 +435,23 @@ if __name__ == "__main__":
         assert apply_style("Wait...", "casual") == "wait..."
         assert apply_style("i think i'm done. see you", "formal") == "I think I'm done. See you."
         assert apply_style("Is it?", "formal") == "Is it?"
+        assert format_lists("My goals are: first, ship it, second, test it, "
+                            "and finally celebrate.") == (
+            "My goals are:\n1. Ship it\n2. Test it\n3. Celebrate"), \
+            ""
+        assert format_lists("First of all, we need milk. Second, eggs.") == "1. We need milk\n2. Eggs"
+        assert format_lists("Number one buy milk number two call mom") == "1. Buy milk\n2. Call mom"
+        assert format_lists("Shopping: bullet point milk, bullet point eggs.") == "Shopping:\n- Milk\n- Eggs"
+        for prose in ("The first time I went, the second visit was better.",
+                      "Wait a second, first things first.",
+                      "First, we eat.",
+                      "Second, we sleep. First, we eat.",
+                      "I came first, and finally won.",
+                      "I was number one in the class, number two in sports.",
+                      "First, second, and third place all got medals."):
+            assert format_lists(prose) == prose, (prose, format_lists(prose))
+        assert apply_style("first, fix the bug. second, ship it", "document") == "1. Fix the bug\n2. Ship it"
+        assert apply_style("no list here", "document") == "No list here."
         assert p.style_for("slack") == "none"
         p.set_style("*", "formal")
         p.set_style("Slack", "casual")
