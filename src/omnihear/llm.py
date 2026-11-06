@@ -118,6 +118,7 @@ def warm(model: str) -> None:
 
 
 _no_think = set()  # models that rejected the "think" option
+last_stats = {}    # timing fields of the last reply (for --bench-llm)
 
 
 def generate(prompt: str, model: str, timeout: float,
@@ -147,6 +148,10 @@ def generate(prompt: str, model: str, timeout: float,
         _no_think.add(model)
         body.pop("think")
         out = _post("/api/generate", body, timeout)
+    global last_stats
+    last_stats = {k: (out or {}).get(k) for k in (
+        "prompt_eval_count", "prompt_eval_duration", "eval_count",
+        "eval_duration")}
     text = (out or {}).get("response")
     return text.strip() if isinstance(text, str) and text.strip() else None
 
@@ -298,9 +303,22 @@ BENCH_SAMPLES = [
 ]
 
 
-def bench(models: list[str], runs: int = 2) -> int:
+def _stats_line() -> str:
+    st = last_stats
+    if not st.get("eval_duration"):
+        return ""
+    ms = lambda ns: (ns or 0) / 1e6
+    return (f"read {st.get('prompt_eval_count') or 0} tok in "
+            f"{ms(st.get('prompt_eval_duration')):.0f} ms, wrote "
+            f"{st.get('eval_count') or 0} tok in "
+            f"{ms(st.get('eval_duration')):.0f} ms")
+
+
+def bench(models: list[str], budget_ms: int = 1500) -> int:
     """`omnihear --bench-llm`: time each model on sample dictations on this
-    machine (after a warm-up), and show what it produced."""
+    machine. Each sample runs twice: the first run is what a new dictation
+    costs; the repeat is answered partly from Ollama's prompt cache, so it
+    is shown but not used for the verdict."""
     if not available():
         print("Ollama is not reachable (start it with `ollama serve`).")
         return 1
@@ -314,16 +332,29 @@ def bench(models: list[str], runs: int = 2) -> int:
         _post("/api/generate", {"model": model, "keep_alive": KEEP_ALIVE},
               timeout=300)
         print(f"   load: {time.monotonic() - warm_t:.1f}s")
-        times = []
+        fresh, repeat = [], []
         for sample in BENCH_SAMPLES:
-            for i in range(runs):
-                t = time.monotonic()
-                out = polish(sample, model, budget_s=30)
-                times.append(time.monotonic() - t)
-            print(f"   {times[-1]:.2f}s  {sample!r}\n          -> {out!r}")
-        times.sort()
-        print(f"   median {times[len(times) // 2]:.2f}s, "
-              f"worst {times[-1]:.2f}s over {len(times)} runs")
+            t = time.monotonic()
+            out = polish(sample, model, budget_s=30)
+            fresh.append(time.monotonic() - t)
+            detail = _stats_line()
+            t = time.monotonic()
+            polish(sample, model, budget_s=30)
+            repeat.append(time.monotonic() - t)
+            print(f"   new {fresh[-1]:.2f}s / repeat {repeat[-1]:.2f}s"
+                  f"{'  (' + detail + ')' if detail else ''}\n"
+                  f"      {sample!r}\n   -> {out!r}")
+        fresh.sort()
+        med = fresh[len(fresh) // 2]
+        print(f"   new dictation: median {med:.2f}s, worst {fresh[-1]:.2f}s")
+        if is_muesli_cleanup(model) or model == DEFAULT_CLEANUP_MODEL:
+            if fresh[-1] * 1000 <= budget_ms:
+                print(f"   fits the smart cleanup budget ({budget_ms} ms).")
+            else:
+                need = int(-(-fresh[-1] * 1000 // 250) * 250 + 250)
+                print(f"   over the smart cleanup budget ({budget_ms} ms): "
+                      f"set smart_cleanup_ms to about {need} in Settings, "
+                      "or slow dictations fall back to the light rules.")
     return 0
 
 
