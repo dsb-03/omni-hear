@@ -2027,7 +2027,7 @@ const HELP = {
   rag_context_limit: 'Max past transcriptions to feed as RAG context.',
   ask_hotkey: 'Second push-to-talk key/combo (e.g. "ctrl_l+space"): hold, ask a question, release to get a locally-generated answer typed instead of the raw transcript. Empty disables it. Requires Ollama installed locally.',
   ask_model: 'Local Ollama model that follows instructions, used by Command Mode and voice Q&A. Default qwen3.5:2b. Install Ollama and run "ollama pull <model>" first.',
-  cleanup_model: 'Local Ollama model for cleanup = smart. The default is a Qwen3.5-2B fine-tuned only for cleaning up dictation (about 1.3 GB). Pull it with: ollama pull hf.co/Muesli-HQ/qwen35-2b-muesli-cleanup-v12-gguf:Q4_K_M'
+  cleanup_model: 'Local Ollama model for cleanup = smart. The default is a Qwen3.5-2B fine-tuned only for cleaning up dictation (about 1.3 GB). Pull it with: ollama pull hf.co/Muesli-HQ/qwen35-2b-muesli-cleanup-v12-gguf:Q4_K_M',
   ask_context_limit: 'Max past transcriptions retrieved as context for voice Q&A.',
   overlay_scale: 'Overall size of the recording indicator. 1 is the original compact size.',
   overlay_position: 'Where on screen the indicator appears.',
@@ -3504,3 +3504,29 @@ def start_dashboard(db, status_fn, port: int = 4738, brain=None, cfg=None,
     threading.Thread(target=server.serve_forever, daemon=True).start()
     print(f"omnihear: dashboard at http://127.0.0.1:{port}")
     return server
+
+
+if __name__ == "__main__":
+    # Self-check: PAGE's inline JavaScript must parse. A syntax error there
+    # (e.g. a missing comma in an object literal) blanks the whole dashboard
+    # and Python never notices. Needs `node`; skipped without it.
+    import re
+    import shutil
+    import tempfile
+
+    scripts = re.findall(r"<script>(.*?)</script>", PAGE, re.S)
+    assert scripts, "PAGE has no inline <script>"
+    if shutil.which("node") is None:
+        print("dashboard self-check skipped (node not installed)")
+    else:
+        for js in scripts:
+            with tempfile.NamedTemporaryFile("w", suffix=".js",
+                                             delete=False) as f:
+                f.write(js)
+            try:
+                r = subprocess.run(["node", "--check", f.name],
+                                   capture_output=True, text=True)
+            finally:
+                os.unlink(f.name)
+            assert r.returncode == 0, "dashboard JavaScript:\n" + r.stderr
+        print("dashboard self-check OK")

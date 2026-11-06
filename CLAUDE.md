@@ -22,6 +22,8 @@ cd src && ../.venv/bin/python3 -m omnihear            # dashboard on by default 
 
 # Syntax check (there is no test suite or linter)
 python3 -m py_compile src/omnihear/*.py
+# Dashboard JS check (node --check on PAGE's inline script; py_compile can't see JS errors)
+cd src && python3 -m omnihear.dashboard
 
 # Build the .deb
 ./build-deb.sh 1.2.0
