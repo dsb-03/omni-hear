@@ -186,7 +186,11 @@ def main():
         from . import llm
         models = args.bench_llm or list(dict.fromkeys(
             [cfg["cleanup_model"], cfg["ask_model"]]))
-        sys.exit(llm.bench(models))
+        if cfg["ask_model"] == "llama3.2":
+            print("note: Command Mode/Q&A still use llama3.2 from your "
+                  "config; the new default is qwen3.5:2b (Settings > Local "
+                  "AI editing).")
+        sys.exit(llm.bench(models, cfg["smart_cleanup_ms"]))
 
     if args.list_devices:
         from .app import list_devices
