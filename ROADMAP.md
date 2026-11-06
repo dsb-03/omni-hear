@@ -17,12 +17,12 @@ and Linux (X11 and Wayland), Windows and macOS all keep working.
 | Insertion | Clipboard paste, restores clipboard | Typing, or clipboard paste with restore (beta) | Built (1.10) |
 | Live "Flow bar" with mic level | Yes | Yes: live waveform, spinner while transcribing, no-signal warning | Done (1.9.0) |
 | Filler-word removal, self-corrections ("2pm, actually 3") | AI auto-edit (cloud) | Rule-based cleanup, English (beta) | Built (1.10); local LLM in Phase 3 |
-| Personal dictionary | Auto-learned + manual | Common Brain (auto, beta) | Phase 2: manual UI |
-| Snippets (voice shortcuts) | Yes | No | Phase 2 |
-| Per-app tone/style | Yes | No | Phase 2 |
+| Personal dictionary | Auto-learned + manual | Manual dictionary + Common Brain (auto, beta) | Built (1.11) |
+| Snippets (voice shortcuts) | Yes | Yes | Built (1.11) |
+| Per-app tone/style | Yes | Rule-based (X11, Windows, macOS) | Built (1.11) |
 | Command Mode (select text, speak an edit) | Yes (cloud LLM) | Voice Q&A only (Ollama) | Phase 3 |
 | Whispering / quiet speech | Yes | No | Phase 3 |
-| Stats (WPM, time saved, streaks) | Yes | Words/day, latency, CPU/RAM | Phase 2 |
+| Stats (WPM, time saved, streaks) | Yes | WPM, time saved, streaks, top apps | Built (1.11) |
 | Guided onboarding + permission checks | Yes | Dashboard setup wizard + `--doctor` | Built (1.10) |
 | Privacy | Cloud, with a zero-retention option | Fully local | Our edge, keep it |
 | Linux / Wayland | No | Yes | Our edge, harden it (Phase 0, 4) |
@@ -183,7 +183,21 @@ user-facing summary.
 
 ---
 
-## Phase 2: Personalization (1.11)
+## Phase 2: Personalization (1.11, built on this branch)
+
+Built in `personal.py` (dictionary, snippets, styles), `focus.py`
+(focused-app detection) and `db.insights()`, on the dashboard's Personal
+tab. Notes on what shipped vs. the plan below:
+- The dictionary is its own `dictionary` table (word, spoken forms,
+  pinned), not the Brain's `vocab` table, so it works without the beta
+  sign-in. Hints merge dictionary words (pinned first) with Brain words.
+- Post-correction is stdlib: listed spoken forms, exact-spelling and
+  split-word matching, plus the metaphone sound-alike pass.
+- Styles and app overrides live in an `app_styles` table (`*` = default)
+  rather than `config.toml`, so changing them needs no restart.
+- The focused app is probed on a thread while Whisper runs (no added
+  latency) and stored in `transcriptions.app` for Insights.
+- Spoken-list → bullets is not built yet.
 
 1. **Personal dictionary UI.** Add, remove and pin words. Merge them with
    Common Brain's learned terms, feed them to `hotwords` / `initial_prompt`,

@@ -83,17 +83,36 @@ Dictation) or `config.toml`.
 - [x] **Record any hotkey by pressing it** in the dashboard: main hotkey,
   paste-last and voice Q&A, with a Clear button for the optional ones.
 
+### Built in this branch (1.11, Personal)
+
+All on the dashboard's new **Personal** tab (Insights are on the main
+Dashboard). Nothing changes until you add an entry, and edits apply to the
+next dictation without a restart. Stored in `history.db`, so they need
+history on.
+
+- [x] **Personal dictionary**: add names and jargon, optionally with how
+  they sound when Whisper gets them wrong ("omni hear" → "Omnihear").
+  - Given to Whisper as hints, pinned words first, merged with the words
+    Common Brain has learned (which also show up as one-click suggestions).
+  - Fixed after transcription: the spoken forms you list, the exact
+    spelling ("github" → "GitHub", also when split as "git hub"), and
+    sound-alikes.
+  - Import and export as plain text (`*` pins, `= a, b` lists sound-alikes).
+- [x] **Snippets**: say a trigger phrase ("insert my address") on its own
+  to type a saved block of text. Only the whole dictation triggers it, so
+  it never fires mid-sentence. History keeps what you said.
+- [x] **Per-app styles**: None, Casual (no final full stop, no automatic
+  capital) or Formal (capitalized sentences and "I", final full stop), per
+  app plus a default for every other app. The app is detected on X11 (needs
+  xdotool), Windows and macOS; on Wayland the default style applies.
+- [x] **Insights**: speaking speed, time saved vs. typing at 40 wpm,
+  current and longest daily streak, and top apps.
+
 ### Planned
 
-**1.11: Personal**
-- [ ] **Personal dictionary**: add or pin names and jargon. Merges with the
-  words Common Brain learns automatically. Import and export as plain text.
-- [ ] **Snippets**: say a trigger phrase ("insert my address") to type a
-  saved block of text.
-- [ ] **Per-app styles**: casual in chat, formal in email, set per app in
-  the dashboard (X11, Windows and macOS; GNOME Wayland uses the default).
-- [ ] **Insights**: words per minute, time saved vs. typing, daily streak,
-  and top apps.
+**Still to do from 1.11**
+- [ ] **Spoken lists → bullets** as a per-app style, for apps where Enter
+  doesn't send.
 
 **1.12: Local AI editing**
 - [ ] **Command Mode**: select text, hold a key, and say "make this shorter"

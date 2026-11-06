@@ -168,8 +168,13 @@ def main():
         from .brain import Brain
         brain = Brain(db, min_count=cfg["brain_min_count"])
 
+    personal = None
+    if db is not None:
+        from .personal import Personal
+        personal = Personal(db)
+
     feedback = Feedback(notify_enabled=cfg["notify"], beep_enabled=cfg["beep"])
-    app = App(cfg, db=db, feedback=feedback, brain=brain)
+    app = App(cfg, db=db, feedback=feedback, brain=brain, personal=personal)
 
     # Opt-in daily usage ping (no-op unless analytics on + signed in).
     import threading as _threading
@@ -179,7 +184,7 @@ def main():
     if cfg["dashboard"]:
         from .dashboard import start_dashboard
         if start_dashboard(db, app.status, port=cfg["dashboard_port"],
-                           brain=brain, cfg=cfg) is None:
+                           brain=brain, cfg=cfg, personal=personal) is None:
             # Port already bound: almost certainly another omnihear instance.
             # Two instances both hear the hotkey and both type, interleaving
             # their output — exit instead.

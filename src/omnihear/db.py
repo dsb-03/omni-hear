@@ -5,7 +5,13 @@ import re
 import sqlite3
 import sys
 import threading
+from datetime import date, timedelta
 from pathlib import Path
+
+# Baseline for "time saved": a typical typing speed, in words per minute.
+TYPING_WPM = 40
+# Word count of a text column (same approximation as stats()).
+_WORDS_SQL = "LENGTH(text) - LENGTH(REPLACE(text, ' ', '')) + 1"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS transcriptions (
@@ -31,6 +37,23 @@ CREATE TABLE IF NOT EXISTS corrections (
     transcription_id INTEGER,
     embedding BLOB,
     UNIQUE(original, corrected)
+);
+CREATE TABLE IF NOT EXISTS dictionary (
+    word TEXT PRIMARY KEY COLLATE NOCASE,
+    sounds_like TEXT NOT NULL DEFAULT '',
+    pinned INTEGER NOT NULL DEFAULT 0,
+    created_ts TEXT
+);
+CREATE TABLE IF NOT EXISTS snippets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    trigger TEXT NOT NULL UNIQUE,
+    text TEXT NOT NULL,
+    uses INTEGER NOT NULL DEFAULT 0,
+    created_ts TEXT
+);
+CREATE TABLE IF NOT EXISTS app_styles (
+    app TEXT PRIMARY KEY,
+    style TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS vocab (
     word TEXT PRIMARY KEY,
@@ -129,6 +152,8 @@ class HistoryDB:
         if "corrected_text" not in cols:
             self._conn.execute(
                 "ALTER TABLE transcriptions ADD COLUMN corrected_text TEXT")
+        if "app" not in cols:  # focused app at insertion (focus.py), or NULL
+            self._conn.execute("ALTER TABLE transcriptions ADD COLUMN app TEXT")
 
     def close(self):
         with self._lock:
@@ -138,15 +163,16 @@ class HistoryDB:
                model: str, cpu_percent: float | None = None,
                memory_mb: float | None = None, avg_logprob: float | None = None,
                no_speech_prob: float | None = None,
-               compression_ratio: float | None = None):
+               compression_ratio: float | None = None,
+               app: str | None = None):
         with self._lock:
             cur = self._conn.execute(
                 "INSERT INTO transcriptions"
                 " (text, audio_seconds, transcribe_ms, model, cpu_percent, memory_mb,"
-                "  avg_logprob, no_speech_prob, compression_ratio)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "  avg_logprob, no_speech_prob, compression_ratio, app)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (text, audio_seconds, transcribe_ms, model, cpu_percent, memory_mb,
-                 avg_logprob, no_speech_prob, compression_ratio),
+                 avg_logprob, no_speech_prob, compression_ratio, app),
             )
             self._conn.commit()
             return cur.lastrowid
@@ -241,6 +267,70 @@ class HistoryDB:
             "per_day": [dict(r) for r in reversed(per_day)],
         }
 
+    def recent_apps(self, days: int = 90, limit: int = 30) -> list[str]:
+        """Apps dictated into recently (focus.py), most used first."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT app FROM transcriptions WHERE app IS NOT NULL"
+                " AND app != '' AND ts >= date('now', 'localtime', ?)"
+                " GROUP BY app ORDER BY COUNT(*) DESC LIMIT ?",
+                (f"-{int(days)} days", int(limit))).fetchall()
+        return [r["app"] for r in rows]
+
+    def insights(self, typing_wpm: int = TYPING_WPM, today=None) -> dict:
+        """Speaking speed, time saved vs. typing, daily streaks, top apps."""
+        today = today or date.today()
+        with self._lock:
+            t = self._conn.execute(
+                "SELECT COALESCE(SUM(audio_seconds), 0) AS audio,"
+                " COALESCE(SUM(transcribe_ms), 0) / 1000.0 AS wait,"
+                f" COALESCE(SUM({_WORDS_SQL}), 0) AS words"
+                " FROM transcriptions").fetchone()
+            days = [r["day"] for r in self._conn.execute(
+                "SELECT DISTINCT substr(ts, 1, 10) AS day FROM transcriptions"
+                " ORDER BY day")]
+            apps = self._conn.execute(
+                f"SELECT app, COUNT(*) AS n, COALESCE(SUM({_WORDS_SQL}), 0)"
+                " AS words FROM transcriptions WHERE app IS NOT NULL AND app != ''"
+                " GROUP BY app ORDER BY words DESC, n DESC LIMIT 5").fetchall()
+        words, audio = t["words"], t["audio"]
+        # Speaking speed over recorded audio; typing time is what the same
+        # words would take at a typical typing speed.
+        wpm = round(words / (audio / 60)) if audio >= 1 else 0
+        saved = max(0.0, words / typing_wpm * 60 - audio - t["wait"])
+        current, longest = _streaks(days, today)
+        return {
+            "speaking_wpm": wpm, "typing_wpm": typing_wpm,
+            "time_saved_seconds": round(saved), "words": words,
+            "streak_days": current, "longest_streak_days": longest,
+            "active_days": len(days),
+            "top_apps": [dict(r) for r in apps],
+        }
+
+
+def _streaks(days: list[str], today) -> tuple[int, int]:
+    """(current, longest) runs of consecutive days. The current streak still
+    counts if today has no dictation yet but yesterday did."""
+    parsed = []
+    for d in days:
+        try:
+            parsed.append(date.fromisoformat(d))
+        except ValueError:
+            continue
+    longest = run = 0
+    prev = None
+    for d in parsed:
+        run = run + 1 if prev and (d - prev).days == 1 else 1
+        longest = max(longest, run)
+        prev = d
+    have = set(parsed)
+    start = today if today in have else today - timedelta(days=1)
+    current = 0
+    while start in have:
+        current += 1
+        start -= timedelta(days=1)
+    return current, longest
+
 
 if __name__ == "__main__":
     import tempfile
@@ -256,5 +346,16 @@ if __name__ == "__main__":
         assert any("flight to Denver" in t for t in texts), texts
         assert not any("weather" in t for t in texts), texts
         assert db.search_relevant("   ") == []
+        db.insert("one two three four", 6.0, 500.0, "base.en", app="slack")
+        ins = db.insights(today=date.today())
+        assert ins["top_apps"][0]["app"] == "slack", ins
+        assert db.recent_apps() == ["slack"], db.recent_apps()
+        assert ins["streak_days"] == 1 and ins["longest_streak_days"] == 1, ins
+        assert ins["speaking_wpm"] > 0 and ins["time_saved_seconds"] >= 0, ins
+        d = date(2026, 3, 10)
+        assert _streaks(["2026-03-01", "2026-03-02", "2026-03-03",
+                         "2026-03-08", "2026-03-09"], d) == (2, 3)
+        assert _streaks(["2026-03-10"], d) == (1, 1)
+        assert _streaks(["2026-03-07"], d) == (0, 1)
         db.close()
     print("db self-check OK")

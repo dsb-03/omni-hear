@@ -332,11 +332,13 @@ INSERT_ECHO_SECONDS = 0.3
 
 
 class App:
-    def __init__(self, cfg: dict, db=None, feedback=None, brain=None):
+    def __init__(self, cfg: dict, db=None, feedback=None, brain=None,
+                 personal=None):
         self.cfg = cfg
         self.db = db
         self.feedback = feedback
         self.brain = brain
+        self.personal = personal  # dictionary / snippets / app styles (personal.py)
         self._hotwords_supported = True  # cleared if faster-whisper is too old
 
         self._model = None
@@ -1050,6 +1052,32 @@ class App:
             return []
         return [h["text"] for h in hits]
 
+    def _vocab_hints(self) -> list[str]:
+        """Words to bias Whisper towards: the personal dictionary (pinned
+        first) and, with the beta Brain, its learned vocabulary."""
+        words = []
+        if self.personal is not None:
+            try:
+                words += self.personal.hint_words()
+            except Exception as e:
+                self._log(f"dictionary lookup failed: {e}")
+        if self._brain_active() and self.cfg.get("brain_hotwords"):
+            try:
+                words += self.brain.top_words(50)
+            except Exception as e:
+                self._log(f"brain hints failed: {e}")
+        seen, out = set(), []
+        for w in words:
+            if w.lower() not in seen:
+                seen.add(w.lower())
+                out.append(w)
+        return out
+
+    @staticmethod
+    def _probe_app(box):
+        from . import focus
+        box.append(focus.active_app())
+
     def _transcribe_one(self, audio, duration, mode="dictate"):
         model = self._get_model()
         t0 = time.monotonic()
@@ -1066,13 +1094,18 @@ class App:
             compression_ratio_threshold=self.cfg["compression_ratio_threshold"],
             condition_on_previous_text=self.cfg["condition_on_previous_text"],
         )
+        # Which app will receive the text (per-app style, Insights). Probed
+        # in parallel with transcription so it adds no latency.
+        app_box = []
+        app_probe = threading.Thread(target=self._probe_app, args=(app_box,),
+                                     daemon=True)
+        app_probe.start()
         prompt_parts = []
-        if self._brain_active() and self.cfg.get("brain_hotwords"):
+        vocab = self._vocab_hints()
+        if vocab:
             if self._hotwords_supported:
-                kwargs["hotwords"] = self.brain.hotwords()
-            bp = self.brain.initial_prompt()
-            if bp:
-                prompt_parts.append(bp)
+                kwargs["hotwords"] = " ".join(vocab[:50])
+            prompt_parts.append(("Vocabulary: " + ", ".join(vocab[:20]) + ".")[:200])
         if self.cfg.get("rag_context"):
             prompt_parts.extend(self._rag_context_texts(
                 self._last_text, self.cfg.get("rag_context_limit", 3)))
@@ -1088,6 +1121,9 @@ class App:
         segments = list(segments)
         text = "".join(seg.text for seg in segments).strip()
 
+        app_probe.join(timeout=1.5)
+        app_name = app_box[0] if app_box else None
+        snippet = None  # expansion to insert instead of the spoken trigger
         if mode == "dictate":
             voice_cmds = self.cfg.get("voice_commands")
             if voice_cmds and text:
@@ -1099,15 +1135,23 @@ class App:
                         self._log(f"Undid last {n} chars")
                     return  # nothing typed, nothing logged to history
 
+            if text and self.personal is not None:
+                try:
+                    snippet = self.personal.match_snippet(text)
+                except Exception as e:
+                    self._log(f"snippet lookup failed: {e}")
+
             resolved_cmd = None
-            if (self.cfg.get("terminal_commands") and text
+            if (not snippet and self.cfg.get("terminal_commands") and text
                     and sys.platform not in ("win32", "darwin")):
                 from . import linux_session, terminal_commands
                 # xdotool window/cwd probes — X11 only.
                 if not linux_session.is_wayland():
                     resolved_cmd = terminal_commands.translate(text)
 
-            if resolved_cmd:
+            if snippet:
+                pass  # history keeps the spoken trigger; the expansion is typed
+            elif resolved_cmd:
                 text = resolved_cmd  # bypass brain/punctuation -- it's a command, not prose
             else:
                 if text and self.cfg.get("cleanup", "off") != "off":
@@ -1120,6 +1164,18 @@ class App:
                         text = self.brain.apply(text)
                     except Exception as e:
                         self._log(f"brain apply failed: {e}")
+                if text and self.personal is not None:
+                    # Dictionary spellings, then the focused app's style.
+                    # Before spoken punctuation, so "period" said out loud
+                    # survives a casual style.
+                    try:
+                        from .personal import apply_style
+                        text = self.personal.apply_dictionary(text)
+                        text = apply_style(
+                            text, self.personal.style_for(app_name),
+                            keep=self.personal.hint_words())
+                    except Exception as e:
+                        self._log(f"personalization failed: {e}")
                 if voice_cmds and text:
                     from . import commands
                     text = commands.apply_punctuation(text)
@@ -1145,7 +1201,7 @@ class App:
             return
         self._log(f"-> {text}")
 
-        typed_text = text
+        typed_text = snippet or text
         if mode == "ask":
             # `text` here is the spoken question -- keep it as-is for history
             # and RAG (it's real dictation content), and type the generated
@@ -1173,7 +1229,8 @@ class App:
                 self.db.insert(text, duration, elapsed_ms, self.cfg["model"],
                                cpu_percent=cpu_percent, memory_mb=memory_mb,
                                avg_logprob=avg_logprob, no_speech_prob=no_speech_prob,
-                               compression_ratio=compression_ratio)
+                               compression_ratio=compression_ratio,
+                               app=app_name)
             except Exception as e:
                 print(f"History write failed: {e}")
         self._last_text = text

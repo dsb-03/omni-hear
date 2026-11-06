@@ -129,17 +129,17 @@ class Brain:
 
     # -- whisper hints ----------------------------------------------------
 
-    def _top_words(self, n: int) -> list[str]:
+    def top_words(self, n: int) -> list[str]:
         return [r["word"] for r in self._query(
             "SELECT word FROM vocab ORDER BY manual DESC, count DESC LIMIT ?",
             (n,))]
 
     def hotwords(self) -> str | None:
-        words = self._top_words(50)
+        words = self.top_words(50)
         return " ".join(words) or None
 
     def initial_prompt(self) -> str | None:
-        words = self._top_words(20)
+        words = self.top_words(20)
         if not words:
             return None
         prompt = "Vocabulary: " + ", ".join(words) + "."
