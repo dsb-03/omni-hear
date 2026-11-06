@@ -339,7 +339,15 @@ class App:
         self.feedback = feedback
         self.brain = brain
         self.personal = personal  # dictionary / snippets / app styles (personal.py)
-        self._hotwords_supported = True  # cleared if faster-whisper is too old
+        # transcribe() options this faster-whisper rejected (too old)
+        self._unsupported_opts = set()
+        # Chunked transcription: per-recording text of chunks already
+        # transcribed (worker-only), and the audio thread's pause tracking.
+        self._chunk_acc = {}
+        self._chunk_frames = 0    # samples since the last cut
+        self._quiet_frames = 0    # consecutive quiet samples
+        self._speech_rms = 0.0    # decaying loud level, for relative pauses
+        self._chunks_cut = 0      # chunks queued for the current recording
 
         self._model = None
         self._model_lock = threading.Lock()
@@ -399,6 +407,7 @@ class App:
         from .overlay_anim import level_from_rms
         ask = self.cfg.get("ask_hotkey") or ""
         paste_last = self.cfg.get("paste_last_hotkey") or ""
+        cmd = self.cfg.get("command_hotkey") or ""
         return {
             "model": self.cfg["model"],
             "hotkey": self.cfg["hotkey"],
@@ -416,6 +425,10 @@ class App:
             "type_method": self._type_method,
             "paste": self._paste,
             "cleanup": self.cfg.get("cleanup", "off"),
+            "command_hotkey_display": (config_mod.hotkey_display(cmd)
+                                       if cmd else ""),
+            "whisper_mode": bool(self.cfg.get("whisper_mode")),
+            "chunked_transcription": bool(self.cfg.get("chunked_transcription")),
         }
 
     def _brain_active(self) -> bool:
@@ -534,6 +547,10 @@ class App:
             risky |= {"ctrl_l", "ctrl_r"}
         if self._paste and sys.platform == "darwin":
             risky |= {"cmd_l", "cmd_r"}
+        if self.cfg.get("command_hotkey"):
+            # Command Mode sends the copy key: Cmd+C, Ctrl+C or Ctrl+Insert.
+            risky |= ({"cmd_l", "cmd_r"} if sys.platform == "darwin"
+                      else {"ctrl_l", "ctrl_r", "insert"})
         return bool(parts) and all(p in risky or len(p) == 1 for p in parts)
 
     def _guard_press(self, name, on_press):
@@ -611,28 +628,36 @@ class App:
                 time.sleep(self._PASTE_SETTLE)  # before a next paste reads it
 
     def _paste_chord(self) -> bool:
-        """Send the paste key through the key backend: Shift+Insert on Linux
-        (see linux_session.paste_chord), Ctrl+V on Windows, Cmd+V on macOS.
-        True if it was sent."""
+        return self._chord("paste")
+
+    def _chord(self, kind) -> bool:
+        """Send the paste or copy key through the key backend. Paste:
+        Shift+Insert on Linux (see linux_session.paste_chord), Ctrl+V on
+        Windows, Cmd+V on macOS. Copy: Ctrl+Insert, Ctrl+C, Cmd+C. True if
+        it was sent."""
         method = self._type_method
         if method in linux_session_methods():
             from . import linux_session
-            return linux_session.paste_chord(method)
+            send = (linux_session.paste_chord if kind == "paste"
+                    else linux_session.copy_chord)
+            return send(method)
         try:
             from pynput.keyboard import Key, KeyCode
+            letter, vk = ("v", 0x56) if kind == "paste" else ("c", 0x43)
             if sys.platform == "darwin":
-                mod, key = Key.cmd, KeyCode.from_char("v")
+                mod, key = Key.cmd, KeyCode.from_char(letter)
             elif sys.platform == "win32":
-                # VK_V by code, so non-Latin layouts still send Ctrl+V.
-                mod, key = Key.ctrl, KeyCode.from_vk(0x56)
+                # VK code, so non-Latin layouts still send Ctrl+V / Ctrl+C.
+                mod, key = Key.ctrl, KeyCode.from_vk(vk)
             else:
-                mod, key = Key.shift, Key.insert
+                mod = Key.shift if kind == "paste" else Key.ctrl
+                key = Key.insert
             kb = self._kb()
             with kb.pressed(mod):
                 kb.press(key)
                 kb.release(key)
         except Exception as e:
-            self._log(f"paste key failed: {e}")
+            self._log(f"{kind} key failed: {e}")
             return False
         return True
 
@@ -668,16 +693,24 @@ class App:
             kb.release(Key.backspace)
 
     @staticmethod
-    def _clean_audio(audio):
+    def _clean_audio(audio, whisper=False):
         """Trim near-silent edges and normalize peak amplitude. vad_filter
         (faster-whisper) handles silence *segmentation* during decoding but
         not input *level* -- a quiet mic can still skew the no_speech_prob/
-        avg_logprob confidence thresholds, which normalization fixes."""
+        avg_logprob confidence thresholds, which normalization fixes.
+        Whisper mode (quiet speech) uses a lower edge gate and normalizes
+        loudness (RMS) instead of the peak, so one click can't keep a
+        whisper quiet; the few samples that would clip are limited."""
         import numpy as np
-        threshold = 0.01  # ponytail: fixed energy gate, revisit if quiet speech gets clipped
+        threshold = 0.002 if whisper else 0.01
         loud = np.where(np.abs(audio) > threshold)[0]
         if loud.size:
             audio = audio[loud[0]:loud[-1] + 1]
+        if whisper and audio.size:
+            rms = float(np.sqrt(np.mean(np.square(audio))))
+            if rms > 1e-5:
+                return np.clip(audio * min(0.1 / rms, 100.0), -0.99, 0.99)
+            return audio
         peak = np.abs(audio).max() if audio.size else 0.0
         if peak > 1e-4:
             audio = audio * (0.9 / peak)
@@ -696,6 +729,10 @@ class App:
             rms = float(np.sqrt(np.mean(np.square(indata))))
         except Exception:
             return
+        if self.cfg.get("chunked_transcription") and self._recording:
+            self._track_pause(len(indata), rms)
+        if self.cfg.get("whisper_mode"):
+            rms *= 4  # ~+12 dB on the meters, so whispering still shows
         self._last_rms = rms
         set_level = self._overlay_level
         if set_level is not None:
@@ -704,14 +741,48 @@ class App:
             except Exception:
                 pass
 
+    # Chunked transcription: cut at a pause of PAUSE_SECONDS once a chunk
+    # holds chunk_seconds of audio. Runs on the audio thread, which must
+    # never take _hk_lock (_stop_recording holds it while closing the
+    # stream, and closing waits for this callback).
+    PAUSE_SECONDS = 0.5
+
+    def _track_pause(self, frames, rms):
+        sr = self.cfg["sample_rate"]
+        self._speech_rms = max(rms, self._speech_rms * 0.995)
+        # Quiet relative to how loud this speaker is, with a floor for
+        # digital silence -- works for whispering as well as normal speech.
+        quiet = rms < max(2e-4, self._speech_rms * 0.15)
+        self._quiet_frames = self._quiet_frames + frames if quiet else 0
+        self._chunk_frames += frames
+        if (self._chunk_frames >= self.cfg.get("chunk_seconds", 10) * sr
+                and self._quiet_frames >= self.PAUSE_SECONDS * sr):
+            self._cut_chunk()
+
+    def _cut_chunk(self):
+        """Audio thread: queue what's been recorded so far as a chunk."""
+        import numpy as np
+        chunks = self._drain_audio()
+        self._chunk_frames = self._quiet_frames = 0
+        if not chunks:
+            return
+        audio = np.concatenate(chunks, axis=0).flatten()
+        duration = len(audio) / self.cfg["sample_rate"]
+        audio = self._clean_audio(audio, bool(self.cfg.get("whisper_mode")))
+        self._chunks_cut += 1
+        self._work_q.put(("chunk", self._rec_gen, audio, duration))
+
     def _start_recording(self, mode="dictate"):
         """Open the mic and start capturing; True if recording. Called with
         _hk_lock held (see the hotkey state machine below)."""
         if self._recording:
             return True
+        self._chunk_frames = self._quiet_frames = self._chunks_cut = 0
+        self._speech_rms = 0.0
         self._recording = True
         self._recording_mode = mode
         self._rec_gen += 1
+        self._warm_llm()
         if self._overlay:
             self._overlay.show()
         if self.feedback:
@@ -818,24 +889,32 @@ class App:
         self._close_stream()
 
         chunks = self._drain_audio()
-        if not chunks:
+        audio, duration = None, 0.0
+        if chunks:
+            audio = np.concatenate(chunks, axis=0).flatten()
+            duration = len(audio) / self.cfg["sample_rate"]
+        if self._chunks_cut:
+            # Earlier chunks are queued: always finish the recording, even
+            # if the tail after the last pause is empty or too short.
+            if duration < self.cfg["min_duration"]:
+                audio, duration = None, 0.0
+        elif audio is None:
             self._log("No audio captured.")
             self._overlay_after_recording()
             return
-        audio = np.concatenate(chunks, axis=0).flatten()
-
-        duration = len(audio) / self.cfg["sample_rate"]
-        if duration < self.cfg["min_duration"]:
+        elif duration < self.cfg["min_duration"]:
             self._log("Too short, ignoring.")
             self._overlay_after_recording()
             return
 
-        audio = self._clean_audio(audio)
-        self._log(f"Queued {duration:.2f}s of audio for transcription...")
+        if audio is not None:
+            audio = self._clean_audio(audio, bool(self.cfg.get("whisper_mode")))
+        self._log(f"Queued {duration:.2f}s of audio for transcription "
+                  f"({self._chunks_cut} earlier chunk(s))...")
         # Recording -> transcribing; the worker clears it when done.
         self._overlay_transcribing()
         self._transcribing += 1
-        self._work_q.put(("transcribe", audio, duration, mode))
+        self._work_q.put(("transcribe", audio, duration, mode, self._rec_gen))
 
     def _cancel_recording(self):
         """Discard the current recording without transcribing it (hands-free
@@ -962,6 +1041,12 @@ class App:
                              self._guard_press(self.cfg.get("ask_hotkey", ""),
                                                lambda: self._on_hotkey_press("ask")),
                              lambda: self._on_hotkey_release("ask")))
+        cmd = extra("command_hotkey", "Command Mode")
+        if cmd is not None:
+            bindings.append((cmd,
+                             self._guard_press(self.cfg.get("command_hotkey", ""),
+                                               lambda: self._on_hotkey_press("command")),
+                             lambda: self._on_hotkey_release("command")))
         paste = extra("paste_last_hotkey", "paste-last")
         if paste is not None:
             bindings.append((paste, self.paste_last, None))
@@ -993,18 +1078,24 @@ class App:
 
     # -- transcription worker -----------------------------------------
     def _worker_loop(self):
-        # The one worker runs every job in order: ("transcribe", audio,
-        # duration, mode) from _stop_recording and ("paste_last", pressed_at)
-        # from the paste-last hotkey.
+        # The one worker runs every job in order: ("chunk", gen, audio,
+        # duration) cut at pauses while recording (chunked_transcription),
+        # ("transcribe", audio, duration, mode, gen) from _stop_recording
+        # (audio is None when chunks already hold everything), and
+        # ("paste_last", pressed_at) from the paste-last hotkey.
         while True:
             job = self._work_q.get()
             try:
                 if job[0] == "paste_last":
                     self._paste_last_job(job[1])
+                elif job[0] == "chunk":
+                    self._chunk_job(*job[1:])
                 else:
-                    _, audio, duration, mode = job
-                    self._transcribe_one(audio, duration, mode)
+                    _, audio, duration, mode, gen = job
+                    self._transcribe_one(audio, duration, mode, gen)
             except Exception as e:
+                if job[0] == "transcribe":
+                    self._chunk_acc.pop(job[4], None)
                 what = "Paste-last" if job[0] == "paste_last" else "Transcription"
                 print(f"{what} error: {e}")
                 if self.feedback:
@@ -1078,48 +1169,111 @@ class App:
         from . import focus
         box.append(focus.active_app())
 
-    def _transcribe_one(self, audio, duration, mode="dictate"):
+    # -- decoding -------------------------------------------------------
+    def _decode(self, audio, language=None, extra_prompt=""):
+        """Run Whisper on one piece of audio. Returns (text, segments, info).
+        `language` overrides the configured one (a pinned chunk language);
+        `extra_prompt` (the previous chunk's text) keeps chunks coherent."""
         model = self._get_model()
-        t0 = time.monotonic()
-        cpu0 = time.process_time()
-        language = self.cfg["language"]
-        if language in ("", "auto"):
-            language = None  # let faster-whisper auto-detect
+        auto = self.cfg["language"] in ("", "auto")
+        if language is None and not auto:
+            language = self.cfg["language"]
+        whisper = bool(self.cfg.get("whisper_mode"))
         kwargs = dict(
             language=language,
             beam_size=self.cfg["beam_size"],
             vad_filter=self.cfg["vad_filter"],
-            no_speech_threshold=self.cfg["no_speech_threshold"],
-            log_prob_threshold=self.cfg["log_prob_threshold"],
+            # Whisper mode: a segment is only dropped as silence when Whisper
+            # is very sure, and quiet speech still passes the VAD.
+            no_speech_threshold=(max(0.8, self.cfg["no_speech_threshold"])
+                                 if whisper else self.cfg["no_speech_threshold"]),
+            log_prob_threshold=(min(-1.5, self.cfg["log_prob_threshold"])
+                                if whisper else self.cfg["log_prob_threshold"]),
             compression_ratio_threshold=self.cfg["compression_ratio_threshold"],
             condition_on_previous_text=self.cfg["condition_on_previous_text"],
         )
+        if whisper and self.cfg["vad_filter"]:
+            kwargs["vad_parameters"] = {"threshold": 0.3}
+        if auto and language is None and self.cfg.get("code_switching"):
+            # Per-segment language detection (faster-whisper >= 1.1).
+            kwargs["multilingual"] = True
+        prompt_parts = []
+        vocab = self._vocab_hints()
+        if vocab:
+            kwargs["hotwords"] = " ".join(vocab[:50])
+            prompt_parts.append(("Vocabulary: " + ", ".join(vocab[:20]) + ".")[:200])
+        if extra_prompt:
+            prompt_parts.append(extra_prompt[-200:])
+        elif self.cfg.get("rag_context"):
+            prompt_parts.extend(self._rag_context_texts(
+                self._last_text, self.cfg.get("rag_context_limit", 3)))
+        if prompt_parts:
+            kwargs["initial_prompt"] = " ".join(prompt_parts)[:400]
+        # Options an older faster-whisper doesn't know are dropped once and
+        # remembered, newest first.
+        for opt in self._unsupported_opts:
+            kwargs.pop(opt, None)
+        while True:
+            try:
+                segments, info = model.transcribe(audio, **kwargs)
+                break
+            except TypeError:
+                opt = next((o for o in ("multilingual", "hotwords")
+                            if o in kwargs), None)
+                if opt is None:
+                    raise
+                self._unsupported_opts.add(opt)
+                kwargs.pop(opt)
+        segments = list(segments)
+        return "".join(seg.text for seg in segments).strip(), segments, info
+
+    def _chunk_job(self, gen, audio, duration):
+        """Worker: transcribe a chunk cut at a pause while the user is still
+        talking, and keep its text for the recording's final job."""
+        t0 = time.monotonic()
+        acc = self._chunk_acc.setdefault(gen, {
+            "texts": [], "segments": [], "duration": 0.0, "elapsed": 0.0,
+            "language": None})
+        text, segments, info = self._decode(
+            audio, language=acc["language"],
+            extra_prompt=" ".join(acc["texts"]))
+        if text:
+            acc["texts"].append(text)
+        acc["segments"] += segments
+        acc["duration"] += duration
+        acc["elapsed"] += time.monotonic() - t0
+        # language = auto: pin what the first chunk detected for the rest of
+        # this dictation (code_switching instead lets every chunk decide).
+        if (acc["language"] is None and not self.cfg.get("code_switching")
+                and self.cfg["language"] in ("", "auto")
+                and getattr(info, "language_probability", 0) >= 0.6):
+            acc["language"] = info.language
+        self._log(f"chunk {len(acc['texts'])}: {duration:.1f}s -> {text!r}")
+
+    def _transcribe_one(self, audio, duration, mode="dictate", gen=None):
+        t0 = time.monotonic()
+        cpu0 = time.process_time()
         # Which app will receive the text (per-app style, Insights). Probed
         # in parallel with transcription so it adds no latency.
         app_box = []
         app_probe = threading.Thread(target=self._probe_app, args=(app_box,),
                                      daemon=True)
         app_probe.start()
-        prompt_parts = []
-        vocab = self._vocab_hints()
-        if vocab:
-            if self._hotwords_supported:
-                kwargs["hotwords"] = " ".join(vocab[:50])
-            prompt_parts.append(("Vocabulary: " + ", ".join(vocab[:20]) + ".")[:200])
-        if self.cfg.get("rag_context"):
-            prompt_parts.extend(self._rag_context_texts(
-                self._last_text, self.cfg.get("rag_context_limit", 3)))
-        if prompt_parts:
-            kwargs["initial_prompt"] = " ".join(prompt_parts)[:400]
-        try:
-            segments, info = model.transcribe(audio, **kwargs)
-        except TypeError:
-            # older faster-whisper without hotwords support
-            self._hotwords_supported = False
-            kwargs.pop("hotwords", None)
-            segments, info = model.transcribe(audio, **kwargs)
-        segments = list(segments)
-        text = "".join(seg.text for seg in segments).strip()
+        acc = self._chunk_acc.pop(gen, None) if gen is not None else None
+        texts, segments, language = [], [], None
+        if acc:
+            texts, segments, language = acc["texts"], acc["segments"], acc["language"]
+            duration += acc["duration"]
+            t0 -= acc["elapsed"]  # total transcription time for history
+        info = None
+        if audio is not None:
+            tail, tail_segments, info = self._decode(
+                audio, language=language, extra_prompt=" ".join(texts))
+            if tail:
+                texts = texts + [tail]
+            segments = segments + tail_segments
+        text = " ".join(texts).strip()
+        lang = language or getattr(info, "language", None)
 
         app_probe.join(timeout=1.5)
         app_name = app_box[0] if app_box else None
@@ -1154,11 +1308,13 @@ class App:
             elif resolved_cmd:
                 text = resolved_cmd  # bypass brain/punctuation -- it's a command, not prose
             else:
-                if text and self.cfg.get("cleanup", "off") != "off":
+                level = self.cfg.get("cleanup", "off")
+                if text and level != "off":
                     # fillers/stutters/self-corrections; "" if only "um"
                     from . import cleanup
-                    text = cleanup.clean(text, self.cfg["cleanup"],
-                                         getattr(info, "language", None))
+                    text = cleanup.clean(text, level, lang)
+                if text and level == "smart":
+                    text = self._smart_cleanup(text)
                 if text and self._brain_active() and self.cfg.get("brain_autocorrect"):
                     try:
                         text = self.brain.apply(text)
@@ -1202,6 +1358,19 @@ class App:
         self._log(f"-> {text}")
 
         typed_text = snippet or text
+        suffix = " "
+        if mode == "command":
+            # `text` is the spoken instruction. With a selection, the
+            # rewrite replaces it; with none, it behaves like voice Q&A.
+            selection = self._grab_selection()
+            if selection:
+                rewritten = self._command_rewrite(text, selection)
+                if rewritten is None:
+                    typed_text = None  # leave the selection untouched
+                else:
+                    typed_text, suffix = rewritten, ""
+            else:
+                mode = "ask"
         if mode == "ask":
             # `text` here is the spoken question -- keep it as-is for history
             # and RAG (it's real dictation content), and type the generated
@@ -1220,10 +1389,11 @@ class App:
             else:
                 self._log("qna unavailable, typing the raw question instead")
 
-        self._insert(typed_text + " ")
-        self._last_typed_len = len(typed_text) + 1
-        if self.feedback:
-            self.feedback.notify("omnihear", typed_text, urgency="normal")
+        if typed_text is not None:
+            self._insert(typed_text + suffix)
+            self._last_typed_len = len(typed_text) + len(suffix)
+            if self.feedback:
+                self.feedback.notify("omnihear", typed_text, urgency="normal")
         if self.db:
             try:
                 self.db.insert(text, duration, elapsed_ms, self.cfg["model"],
@@ -1239,6 +1409,106 @@ class App:
             cloud.track_activation()
         except Exception:
             pass
+
+    # -- local AI editing (llm.py) ---------------------------------------
+    def _llm_model(self):
+        return self.cfg.get("ask_model") or "llama3.2"
+
+    def _uses_llm(self):
+        return bool(self.cfg.get("command_hotkey")
+                    or self.cfg.get("cleanup") == "smart")
+
+    def _warm_llm(self):
+        """Pre-load the Ollama model as a recording starts (background)."""
+        if not self._uses_llm():
+            return
+
+        def warm():
+            try:
+                from . import llm
+                llm.warm(self._llm_model())
+            except Exception:
+                pass
+        threading.Thread(target=warm, daemon=True).start()
+
+    def _smart_cleanup(self, text):
+        """cleanup = "smart": an LLM polish within smart_cleanup_ms; the
+        rule-cleaned text if it's slow, unavailable or implausible."""
+        from . import llm
+        budget = self.cfg.get("smart_cleanup_ms", 1500) / 1000
+        t0 = time.monotonic()
+        try:
+            out = llm.polish(text, self._llm_model(), budget)
+        except Exception as e:
+            out = None
+            self._log(f"smart cleanup failed: {e}")
+        self._log(f"smart cleanup {'applied' if out else 'skipped'} "
+                  f"({(time.monotonic() - t0) * 1000:.0f} ms)")
+        return out or text
+
+    def _command_rewrite(self, instruction, selection):
+        from . import llm
+        try:
+            out = llm.rewrite(instruction, selection, self._llm_model())
+        except Exception as e:
+            out = None
+            self._log(f"command rewrite failed: {e}")
+        if out is None:
+            msg = ("Command Mode needs Ollama running locally "
+                   f"(model {self._llm_model()}); the selection was left "
+                   "unchanged.")
+            print(f"omnihear: {msg}")
+            if self.feedback:
+                self.feedback.notify("omnihear", msg, urgency="normal")
+        return out
+
+    _SELECTION_WAIT = 0.5  # s to wait for the app to answer the copy key
+
+    def _grab_selection(self):
+        """The focused app's selected text, or None. Puts a marker on the
+        clipboard, sends the copy key (Ctrl+Insert on Linux, Ctrl+C on
+        Windows, Cmd+C on macOS) and reads the clipboard back: if the marker
+        is still there, nothing was selected. The user's clipboard text is
+        put back afterwards."""
+        from . import clipboard
+        if clipboard.backend() is None:
+            return None
+        clip_lock = getattr(self, "_clip_lock", None)
+        if clip_lock is not None:
+            clip_lock.acquire()
+        try:
+            if getattr(self, "_clip_ours", None) is not None:
+                # A paste's restore is pending: the clipboard holds our
+                # dictation, the user's own text is in _clip_saved.
+                saved = self._clip_saved[0]
+                self._clip_saved, self._clip_ours = (None, None), None
+            else:
+                saved = clipboard.get_text()
+            marker = f"⁣omnihear-selection-{time.monotonic_ns()}"
+            if not clipboard.set_text(marker, primary=False):
+                return None
+            time.sleep(self._PASTE_SETTLE)
+            self._inserting = True  # our own keys: keep hotkeys from firing
+            start = time.monotonic()
+            try:
+                sent = self._chord("copy")
+            finally:
+                self._insert_window = (start, time.monotonic())
+                self._inserting = False
+            got = None
+            deadline = time.monotonic() + self._SELECTION_WAIT
+            while sent and time.monotonic() < deadline:
+                time.sleep(0.03)
+                cur = clipboard.get_text()
+                if cur is not None and cur != marker:
+                    got = cur
+                    break
+            clipboard.set_text(saved if saved is not None else "",
+                               primary=False)
+            return got if got and got.strip() else None
+        finally:
+            if clip_lock is not None:
+                clip_lock.release()
 
     # -- main loop -----------------------------------------------------
     def run(self):

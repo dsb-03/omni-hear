@@ -1922,7 +1922,8 @@ const LANGUAGES = [['auto','Auto-detect Language']].concat(
 const COMPUTE_TYPES = ['int8','float16','int8_float16','float32'];
 const BOOLS = ['dashboard','notify','beep','history','verbose','vad_filter',
   'condition_on_previous_text','brain','brain_autocorrect','brain_hotwords','analytics',
-  'voice_commands','terminal_commands','rag_context','hands_free'];
+  'voice_commands','terminal_commands','rag_context','hands_free',
+  'chunked_transcription','whisper_mode','code_switching'];
 const NUMBERS = {
   sample_rate: {min: 8000, step: 1000},
   beam_size: {min: 1, step: 1},
@@ -1936,6 +1937,8 @@ const NUMBERS = {
   rag_context_limit: {min: 1, max: 20, step: 1},
   ask_context_limit: {min: 1, max: 20, step: 1},
   max_recording_seconds: {min: 10, max: 3600, step: 10},
+  chunk_seconds: {min: 5, max: 60, step: 1},
+  smart_cleanup_ms: {min: 200, max: 10000, step: 100},
   overlay_scale: {step: 0.1},
   overlay_opacity: {step: 0.05},
   overlay_offset_x: {step: 10},
@@ -1965,11 +1968,13 @@ const OVERLAY_CHOICES = {
 // Beta-only settings: rendered on #/beta, never in #/settings.
 const BETA_KEYS = ['brain','brain_autocorrect','brain_hotwords','brain_min_count','analytics',
   'voice_commands','terminal_commands','rag_context','rag_context_limit',
-  'ask_hotkey','ask_model','ask_context_limit'];
+  'ask_hotkey','ask_context_limit'];
 const SECTIONS = [
   ['Transcription Engine', ['model','language','device','compute_type','beam_size']],
   ['Input & Trigger', ['hotkey','sample_rate','min_duration','type_method']],
   ['Dictation (new)', ['hands_free','max_recording_seconds','paste_last_hotkey','cleanup']],
+  ['Local AI editing (new)', ['command_hotkey','ask_model','smart_cleanup_ms']],
+  ['Long & quiet dictation (new)', ['chunked_transcription','chunk_seconds','whisper_mode','code_switching']],
   ['Hallucination Filtering', ['vad_filter','no_speech_threshold',
     'log_prob_threshold','compression_ratio_threshold','condition_on_previous_text']],
   ['Dashboard & SQLite DB', ['dashboard','dashboard_port','history']],
@@ -1990,7 +1995,13 @@ const HELP = {
   hands_free: 'Beta. Double-tap the hotkey to keep recording without holding it; tap once more to stop and transcribe.',
   max_recording_seconds: 'Safety cap: recording stops and is transcribed after this many seconds (hands-free or held).',
   paste_last_hotkey: 'Optional key/combo that puts your last transcript at the cursor again, for when it went to the wrong window. Empty disables it.',
-  cleanup: 'Beta. light: remove filler words (um, uh), stutters ("the the") and spoken self-corrections ("at 2, actually 3" becomes "at 3") before typing.',
+  cleanup: 'Beta. light: remove filler words (um, uh), stutters ("the the") and spoken self-corrections ("at 2, actually 3" becomes "at 3") before typing. smart: light, then a local Ollama model fixes grammar and punctuation; if it takes longer than the smart cleanup budget, the light result is typed.',
+  command_hotkey: 'Beta. Command Mode: select text, hold this key/combo, say an edit ("make this shorter", "turn this into bullets"), release. A local Ollama model rewrites the selection in place. With nothing selected it answers like voice Q&A. Empty disables it.',
+  smart_cleanup_ms: 'Time budget for cleanup = smart. If the local model takes longer, the rule-based cleanup is typed instead.',
+  chunked_transcription: 'Beta. Transcribe long dictations in pieces at natural pauses while you are still talking, so text appears sooner after you release.',
+  chunk_seconds: 'Chunked transcription: minimum seconds of audio before cutting at the next pause.',
+  whisper_mode: 'Beta. For speaking quietly: boosts quiet audio and lowers the voice-detection thresholds. The overlay meter is boosted too.',
+  code_switching: 'Beta. With language set to Auto-detect, allow the language to change within one dictation. Off: a long dictation keeps the language detected at its start.',
   vad_filter: 'Trim silence/noise before transcription using Silero VAD. Reduces hallucinated text on quiet clips.',
   no_speech_threshold: 'Segments with a no-speech probability above this are treated as silence, not text.',
   log_prob_threshold: 'Segments whose average log-probability falls below this are considered low-confidence.',
@@ -2013,7 +2024,7 @@ const HELP = {
   rag_context: 'Retrieve relevant past transcriptions (keyword search over history.db) and feed them to Whisper as extra initial_prompt context, alongside Common Brain’s vocabulary.',
   rag_context_limit: 'Max past transcriptions to feed as RAG context.',
   ask_hotkey: 'Second push-to-talk key/combo (e.g. "ctrl_l+space"): hold, ask a question, release to get a locally-generated answer typed instead of the raw transcript. Empty disables it. Requires Ollama installed locally.',
-  ask_model: 'Ollama model name used to generate voice Q&A answers (e.g. "llama3.2"). Ollama must be installed and the model pulled locally.',
+  ask_model: 'Local Ollama model (e.g. "llama3.2") used by Command Mode, smart cleanup and voice Q&A. Install Ollama and run "ollama pull <model>" first.',
   ask_context_limit: 'Max past transcriptions retrieved as context for voice Q&A.',
   overlay_scale: 'Overall size of the recording indicator. 1 is the original compact size.',
   overlay_position: 'Where on screen the indicator appears.',
@@ -2030,7 +2041,8 @@ const HELP = {
   overlay_bar_height: 'Height of the tallest waveform bar, before scaling. The container grows to fit.',
   overlay_bar_shape: 'Waveform bars with rounded ends, or square ends.',
 };
-const pretty = k => OVERLAY_LABELS[k] || k.replace(/_/g, ' ');
+const FIELD_LABELS = {ask_model: 'local AI model (Ollama)', smart_cleanup_ms: 'smart cleanup budget (ms)'};
+const pretty = k => OVERLAY_LABELS[k] || FIELD_LABELS[k] || k.replace(/_/g, ' ');
 const prettyOpt = o => o.replace(/_/g, ' ');
 const keyDisplay = hk => String(hk).split('+').filter(Boolean)
   .map(p => KEY_NAMES[p] || p.toUpperCase()).join(' + ');
@@ -2106,7 +2118,7 @@ function codeToName(code, key) {
 
 // Every <button data-capture-key="..."> is a capture field; its value lives
 // in data-value ('' = not set). Optional keys get a Clear button.
-const CAPTURE_KEYS = {hotkey: false, paste_last_hotkey: true, ask_hotkey: true};  // key -> clearable
+const CAPTURE_KEYS = {hotkey: false, paste_last_hotkey: true, ask_hotkey: true, command_hotkey: true};  // key -> clearable
 const hkLabel = v => v ? keyDisplay(v) : 'Not set — click to record';
 
 function captureField(k, v) {

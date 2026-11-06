@@ -20,8 +20,8 @@ and Linux (X11 and Wayland), Windows and macOS all keep working.
 | Personal dictionary | Auto-learned + manual | Manual dictionary + Common Brain (auto, beta) | Built (1.11) |
 | Snippets (voice shortcuts) | Yes | Yes | Built (1.11) |
 | Per-app tone/style | Yes | Rule-based (X11, Windows, macOS) | Built (1.11) |
-| Command Mode (select text, speak an edit) | Yes (cloud LLM) | Voice Q&A only (Ollama) | Phase 3 |
-| Whispering / quiet speech | Yes | No | Phase 3 |
+| Command Mode (select text, speak an edit) | Yes (cloud LLM) | Yes, local Ollama (beta) | Built (1.12) |
+| Whispering / quiet speech | Yes | Whisper mode (beta) | Built (1.12) |
 | Stats (WPM, time saved, streaks) | Yes | WPM, time saved, streaks, top apps | Built (1.11) |
 | Guided onboarding + permission checks | Yes | Dashboard setup wizard + `--doctor` | Built (1.10) |
 | Privacy | Cloud, with a zero-retention option | Fully local | Our edge, keep it |
@@ -221,7 +221,27 @@ tab. Notes on what shipped vs. the plan below:
 
 ---
 
-## Phase 3: Local AI editing (1.12)
+## Phase 3: Local AI editing (1.12, built on this branch)
+
+Built and beta, off by default. Notes on what shipped vs. the plan below:
+- `llm.py` talks to Ollama's **HTTP API** on localhost (urllib) rather than
+  the `ollama run` CLI that `qna.py` uses: smart cleanup needs a hard
+  timeout, and the API can pre-load the model (`keep_alive`) when a
+  recording starts. A non-local `OLLAMA_HOST` is refused.
+- Command Mode reads the selection the same way on every platform: put a
+  marker on the clipboard, send the copy key (Ctrl+Insert on Linux, which
+  terminals honour too), read the clipboard back, restore it. No
+  selection → voice Q&A. Ollama missing → nothing is typed over the
+  selection.
+- Smart cleanup runs the light rules first, then the LLM, and rejects
+  answers that don't look like a light edit (length and word-overlap
+  checks).
+- Chunking runs on the audio thread (it must never take `_hk_lock`) and
+  queues tagged `("chunk", gen, audio, duration)` jobs on the existing
+  worker; the final `("transcribe", audio|None, duration, mode, gen)` job
+  joins the chunk texts and runs the normal pipeline once.
+- Whisper mode's overlay hint is a boosted meter, not a separate state, so
+  the three overlay renderers didn't need changes.
 
 1. **Command Mode.** Select text, hold the command hotkey, and say "make this
    shorter" or "turn this into bullets". omnihear grabs the selection (X11

@@ -108,22 +108,47 @@ history on.
 - [x] **Insights**: speaking speed, time saved vs. typing at 40 wpm,
   current and longest daily streak, and top apps.
 
+### Built in this branch (1.12, Local AI editing, beta)
+
+Off by default; Settings > "Local AI editing" and "Long & quiet dictation".
+The AI features need [Ollama](https://ollama.com) running on this computer
+with a model pulled (`ollama pull llama3.2`); `omnihear --doctor` checks it.
+omnihear only talks to a local Ollama and refuses a non-local
+`OLLAMA_HOST`.
+
+- [x] **Command Mode** (`command_hotkey`): select text, hold the key, say
+  "make this shorter" or "turn this into bullets", release. The local model
+  rewrites the selection in place.
+  - omnihear reads the selection by sending the copy key (Ctrl+Insert on
+    Linux, so terminals work too; Ctrl+C on Windows, Cmd+C on macOS) and
+    puts your clipboard back afterwards. Needs a clipboard tool on Linux
+    (xclip, or wl-clipboard on KDE/wlroots).
+  - Nothing selected: it answers like voice Q&A.
+  - Ollama not running: the selection is left untouched and you get a
+    notification.
+- [x] **Smart cleanup** (`cleanup = "smart"`): the light rules, then a
+  local-model pass for grammar and punctuation. If it takes longer than
+  `smart_cleanup_ms` (default 1.5 s) or the answer doesn't look like an
+  edit of what you said, the light result is typed. The model is pre-loaded
+  as you start talking.
+- [x] **Faster long dictations** (`chunked_transcription`): while you're
+  still talking, audio is transcribed in chunks at natural pauses (after at
+  least `chunk_seconds`, default 10). On release only the last piece is
+  left to transcribe. Each chunk gets the previous text as context.
+- [x] **Whisper mode** (`whisper_mode`): boosts quiet audio (loudness
+  normalization instead of peak), lowers the voice-detection and
+  no-speech thresholds, and boosts the overlay meter so a whisper still
+  shows.
+- [x] **Language switching** (`code_switching`, with language = auto):
+  Whisper may change language within one dictation. Without it, a chunked
+  dictation keeps the language detected in its first chunk.
+
 ### Planned
 
 **Still to do from 1.11**
 - [ ] **Spoken lists → bullets** as a per-app style, for apps where Enter
   doesn't send.
 
-**1.12: Local AI editing**
-- [ ] **Command Mode**: select text, hold a key, and say "make this shorter"
-  or "turn this into bullets". A local Ollama model rewrites it in place.
-- [ ] **Smart cleanup**: an optional local-LLM pass for grammar and tone,
-  with a latency budget that falls back to rule-based cleanup.
-- [ ] **Faster long dictations**: transcribe in chunks at natural pauses
-  while you're still talking.
-- [ ] **Whisper mode**: a profile for speaking quietly (open-plan offices,
-  late nights).
-- [ ] **Language switching mid-session** when the language is set to auto.
 
 ## Other improvements
 

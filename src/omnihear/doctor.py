@@ -56,6 +56,22 @@ def _clipboard_row() -> tuple[str, str, str]:
     return (OK, label, tool)
 
 
+def _llm_row(cfg: dict) -> tuple[str, str, str]:
+    """Command Mode / smart cleanup: is a local Ollama reachable?"""
+    from . import llm
+    label, model = "local AI (Ollama)", cfg.get("ask_model") or "llama3.2"
+    if llm.base_url() is None:
+        return (FAIL, label, "OLLAMA_HOST is not on this machine; omnihear "
+                "only uses a local Ollama")
+    if llm.available():
+        return (OK, label, f"running; model {model} "
+                f"(`ollama pull {model}` if it is missing)")
+    how = ("install from ollama.com, then `ollama pull " + model + "`"
+           if not shutil.which("ollama") else "installed but not running — "
+           "start it (`ollama serve`)")
+    return (WARN, label, how)
+
+
 def checks(cfg: dict) -> list[tuple[str, str, str]]:
     """(status, label, detail) rows."""
     rows: list[tuple[str, str, str]] = []
@@ -81,6 +97,13 @@ def checks(cfg: dict) -> list[tuple[str, str, str]]:
 
     if (cfg.get("type_method") or "auto") == "paste":
         rows.append(_clipboard_row())
+    if cfg.get("command_hotkey") or cfg.get("cleanup") == "smart":
+        rows.append(_llm_row(cfg))
+    if cfg.get("command_hotkey") and (cfg.get("type_method") or "auto") != "paste":
+        from . import clipboard
+        if clipboard.backend() is None:
+            add(WARN, "Command Mode", "needs a clipboard tool to read the "
+                "selection (xclip, or wl-clipboard on KDE/wlroots)")
 
     if sys.platform in ("win32", "darwin"):
         add(OK, "platform", sys.platform)
