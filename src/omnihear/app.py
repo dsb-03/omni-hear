@@ -165,9 +165,25 @@ class RecordingOverlay:
 
         w, h = sty.width, sty.height
         try:
-            x, y = oa.place(sty, self.cfg, root.winfo_screenwidth(),
-                            root.winfo_screenheight())
-            root.geometry(f"{w}x{h}+{x}+{y}")
+            mon = None
+            if sys.platform == "win32":
+                # Primary monitor's top-left is always (0, 0) in Windows'
+                # multi-monitor coordinate space; SM_CXSCREEN/SM_CYSCREEN
+                # (indices 0, 1) are its size, unlike winfo_screenwidth()/
+                # _height(), which span every monitor combined.
+                import ctypes
+                user32 = ctypes.windll.user32
+                mon = (0, 0, user32.GetSystemMetrics(0), user32.GetSystemMetrics(1))
+            elif sys.platform != "darwin":
+                from . import linux_session
+                mon = linux_session.primary_monitor_geometry()
+            if mon:
+                mx, my, mw, mh = mon
+            else:
+                mx, my = 0, 0
+                mw, mh = root.winfo_screenwidth(), root.winfo_screenheight()
+            x, y = oa.place(sty, self.cfg, mw, mh)
+            root.geometry(f"{w}x{h}+{x + mx}+{y + my}")
         except Exception:
             root.geometry(f"{w}x{h}+900+900")
 

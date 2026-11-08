@@ -91,8 +91,11 @@ jobs:
       - name: Install packaging tools
         run: pip install pyinstaller -r src/requirements-win.txt
 
+      - name: Write bundled version file
+        run: Set-Content -NoNewline -Path windows/VERSION -Value "${{ steps.version.outputs.version }}"
+
       - name: Build with PyInstaller
-        run: pyinstaller --noconsole --onedir --name omnihear --paths src --icon windows/omnihear.ico --add-data "windows/omnihear.ico;." --collect-all faster_whisper --collect-all ctranslate2 --hidden-import metaphone windows/entry.py
+        run: pyinstaller --noconsole --onedir --name omnihear --paths src --icon windows/omnihear.ico --add-data "windows/omnihear.ico;." --add-data "windows/VERSION;." --collect-all faster_whisper --collect-all ctranslate2 --hidden-import metaphone windows/entry.py
 
       - name: Build installer with Inno Setup
         run: |
