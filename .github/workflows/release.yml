@@ -165,6 +165,7 @@ jobs:
   # blocks the macOS/Windows release.
   publish-release:
     needs: [build-windows, build-macos]
+    if: ${{ !cancelled() && needs.build-windows.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -174,7 +175,10 @@ jobs:
         id: version
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
+      # Best-effort, like the Linux .deb below: a broken macOS runner image
+      # (or any other build-macos failure) never blocks the Windows release.
       - name: Download macOS DMG
+        continue-on-error: true
         uses: actions/download-artifact@v4
         with:
           name: macos-dmg
@@ -202,7 +206,7 @@ jobs:
           prerelease: ${{ contains(github.ref_name, '-') }}
 
       - name: Update Homebrew Cask tap (skipped without tap token)
-        if: ${{ !contains(github.ref_name, '-') }}
+        if: ${{ !contains(github.ref_name, '-') && needs.build-macos.result == 'success' }}
         env:
           GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           VERSION: ${{ steps.version.outputs.version }}
