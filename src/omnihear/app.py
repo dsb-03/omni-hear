@@ -166,7 +166,15 @@ class RecordingOverlay:
         w, h = sty.width, sty.height
         try:
             mon = None
-            if sys.platform not in ("win32", "darwin"):
+            if sys.platform == "win32":
+                # Primary monitor's top-left is always (0, 0) in Windows'
+                # multi-monitor coordinate space; SM_CXSCREEN/SM_CYSCREEN
+                # (indices 0, 1) are its size, unlike winfo_screenwidth()/
+                # _height(), which span every monitor combined.
+                import ctypes
+                user32 = ctypes.windll.user32
+                mon = (0, 0, user32.GetSystemMetrics(0), user32.GetSystemMetrics(1))
+            elif sys.platform != "darwin":
                 from . import linux_session
                 mon = linux_session.primary_monitor_geometry()
             if mon:
