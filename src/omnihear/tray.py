@@ -56,13 +56,33 @@ def start_tray(port: int, stop_cb):
         # pynput thread is wedged; force-exit shortly after as a ceiling.
         threading.Timer(2.0, lambda: os._exit(0)).start()
 
+    update = {"tag": None, "url": None}
+
+    def _open_update(icon, item):
+        if update["url"]:
+            webbrowser.open(update["url"])
+
     icon = pystray.Icon(
         "omnihear", _icon_image(), "Omnihear",
         menu=pystray.Menu(
             pystray.MenuItem("Open Dashboard", _open_dashboard, default=True),
+            pystray.MenuItem(lambda item: f"Update available: {update['tag']}",
+                              _open_update, visible=lambda item: update["tag"] is not None),
             pystray.MenuItem("Quit", _quit),
         ),
     )
+    if sys.platform == "win32":
+        def _check_update():
+            from . import update_check
+            found = update_check.check()
+            if found:
+                update["tag"], update["url"] = found
+                icon.update_menu()
+                try:
+                    icon.notify(f"omnihear {found[0]} is available", "Update available")
+                except Exception:
+                    pass
+        threading.Thread(target=_check_update, daemon=True).start()
     if sys.platform == "darwin":
         # AppKit demands the run loop own the main thread — block here.
         # __main__.py runs app.run() on a background thread on macOS.

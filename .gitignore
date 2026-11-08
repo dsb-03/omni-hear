@@ -13,3 +13,6 @@ macos/omnihear.iconset/
 __pycache__/
 *.pyc
 .venv/
+
+# Windows build artifact (written by release.yml, read by update_check.py)
+windows/VERSION
