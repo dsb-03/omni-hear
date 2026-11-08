@@ -165,9 +165,17 @@ class RecordingOverlay:
 
         w, h = sty.width, sty.height
         try:
-            x, y = oa.place(sty, self.cfg, root.winfo_screenwidth(),
-                            root.winfo_screenheight())
-            root.geometry(f"{w}x{h}+{x}+{y}")
+            mon = None
+            if sys.platform not in ("win32", "darwin"):
+                from . import linux_session
+                mon = linux_session.primary_monitor_geometry()
+            if mon:
+                mx, my, mw, mh = mon
+            else:
+                mx, my = 0, 0
+                mw, mh = root.winfo_screenwidth(), root.winfo_screenheight()
+            x, y = oa.place(sty, self.cfg, mw, mh)
+            root.geometry(f"{w}x{h}+{x + mx}+{y + my}")
         except Exception:
             root.geometry(f"{w}x{h}+900+900")
 

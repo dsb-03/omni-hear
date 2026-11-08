@@ -50,6 +50,37 @@ def wtype_supported() -> bool:
     return not (is_gnome() or "kde" in d or "plasma" in d)
 
 
+def primary_monitor_geometry() -> tuple[int, int, int, int] | None:
+    """(x, y, width, height) of the primary monitor (xrandr's '*' flag, or
+    the first listed monitor if none is marked primary), for both X11 and
+    XWayland. None if xrandr is missing or its output can't be parsed --
+    callers then fall back to the full (possibly multi-monitor) virtual
+    screen, which is what overlay placement used before this existed."""
+    if not shutil.which("xrandr"):
+        return None
+    try:
+        out = subprocess.run(["xrandr", "--listmonitors"], capture_output=True,
+                              text=True, timeout=2).stdout
+    except Exception:
+        return None
+    import re
+    first = primary = None
+    for line in out.splitlines()[1:]:
+        parts = line.split()
+        if len(parts) < 3:
+            continue
+        m = re.search(r"(\d+)/\d+x(\d+)/\d+\+(-?\d+)\+(-?\d+)", parts[2])
+        if not m:
+            continue
+        geom = (int(m.group(3)), int(m.group(4)), int(m.group(1)), int(m.group(2)))
+        if first is None:
+            first = geom
+        if "*" in parts[1]:
+            primary = geom
+            break
+    return primary or first
+
+
 def has_ibus_unicode_entry() -> bool:
     """Ctrl+Shift+U unicode entry is available (IBus, GNOME's default)."""
     if is_gnome():

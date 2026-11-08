@@ -1515,6 +1515,7 @@ function route() {
     loadHistory();
   } else if (isSett) {
     document.getElementById('screen-settings').classList.add('active');
+    ovStart();   // canvas may have built while hidden, killing its raf loop
   } else {
     document.getElementById('screen-dashboard').classList.add('active');
     loadDashboard();

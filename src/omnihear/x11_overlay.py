@@ -233,8 +233,15 @@ class ArgbOverlay:
             _ignore_x_errors(x)
             st = self.style
             w, h = st.width, st.height
-            px, py = oa.place(st, self.cfg, x.XDisplayWidth(dpy, scr),
-                              x.XDisplayHeight(dpy, scr))
+            from . import linux_session
+            mon = linux_session.primary_monitor_geometry()
+            if mon:
+                mx, my, mw, mh = mon
+            else:
+                mx, my = 0, 0
+                mw, mh = x.XDisplayWidth(dpy, scr), x.XDisplayHeight(dpy, scr)
+            px, py = oa.place(st, self.cfg, mw, mh)
+            px, py = px + mx, py + my
             root = x.XRootWindow(dpy, scr)
             attrs = _XSetWindowAttributes()
             attrs.override_redirect = 1
