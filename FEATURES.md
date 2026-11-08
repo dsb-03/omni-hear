@@ -232,3 +232,17 @@ omnihear only talks to a local Ollama and refuses a non-local
   default, a "Linux setup" issue template that asks for `--doctor` output,
   and a validation matrix across Ubuntu 24.04, 25.10, 26.04, Kubuntu,
   Debian and wlroots. *(continuous)*
+
+## Known bugs (to fix)
+
+- [ ] **Overlay can land off-screen with multiple displays.** The
+  recording pill is centred on the whole combined desktop rather than on
+  one monitor, so with two or more displays it can end up between or past
+  the screens' edges and never be seen. Cause: `overlay_anim.place()` gets
+  the full virtual-screen size; it should be given one monitor's geometry
+  (the primary one, or the one with the focused window / mouse pointer).
+  *(reported 2026-11-08)*
+- [ ] **Recording-overlay icon missing in dashboard Settings on first
+  load.** The icon (overlay preview) in Settings doesn't show when the page
+  first opens; it only appears after reloading the page. *(reported
+  2026-11-08)*
