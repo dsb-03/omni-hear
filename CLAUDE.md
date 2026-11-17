@@ -17,6 +17,12 @@ cd src && ../.venv/bin/python3 -m omnihear            # dashboard on by default 
 ../.venv/bin/python3 -m omnihear --write-config        # dump effective settings to config.toml
 ../.venv/bin/python3 -m omnihear --doctor             # setup checks (Wayland perms, audio, deps)
 
+# Dev checkout next to an installed .deb (Linux): .venv with the postinst's deps
+# (--indic adds PyTorch for the Indic engine + HF login), then run it; dev-run
+# stops/restarts the installed systemd service, --isolated = separate config/history
+./scripts/dev-setup.sh [--indic] [--cpu|--gpu]
+./scripts/dev-run.sh [--isolated] [omnihear flags, e.g. --asr-backend indic]
+
 # Landing page (site/ -> docs/, served by GitHub Pages)
 ./scripts/sync-site.sh
 
