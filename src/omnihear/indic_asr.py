@@ -391,8 +391,20 @@ class GgufEngine:
         if any(l.endswith("-Latn") for l in self.languages):
             modes.append("roman")
         self.modes = tuple(modes)
+        langs = self.base_languages
         print(f"omnihear: GGUF output scripts: {', '.join(self.modes)}; "
-              f"languages: {', '.join(self.base_languages) or '?'}")
+              f"languages: {', '.join(langs[:30]) or '?'}"
+              + (f" (+{len(langs) - 30} more)" if len(langs) > 30 else ""))
+        if not self._itn:
+            # Files from transcribe.cpp's convert-indic-canary.py carry the
+            # Indic prompt slot (itn is advertised) and the 27 Indic codes.
+            # Without the slot the model gets stock Canary's 9-token prompt,
+            # not the 10-token one it was trained on, and output degrades.
+            print("omnihear: WARNING: this .gguf is not a transcribe.cpp "
+                  "Indic-Transcribe conversion (no romanized/itn prompt slot"
+                  + (f", {len(langs)} languages instead of 27" if len(langs) > 40
+                     else "") + "); expect poor transcripts. Use a file made "
+                  "with transcribe.cpp's scripts/convert-indic-canary.py.")
 
     def _warn_once(self, key, msg):
         if key not in self._warned:

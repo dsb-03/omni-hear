@@ -115,7 +115,7 @@ if [ "$GGUF" = 1 ]; then
     git -C "$TCPP" fetch --quiet origin "pull/$TCPP_PR/head:indic-pr" --force
     git -C "$TCPP" checkout --quiet indic-pr
     FLAGS=(-DTRANSCRIBE_BUILD_SHARED=ON -DTRANSCRIBE_BUILD_TESTS=OFF
-           -DCMAKE_BUILD_TYPE=Release)
+           -DTRANSCRIBE_BUILD_TOOLS=ON -DCMAKE_BUILD_TYPE=Release)
     if [ "$VULKAN" = 1 ]; then
         FLAGS+=(-DTRANSCRIBE_VULKAN=ON)
         echo "==> Building with Vulkan"
@@ -135,6 +135,8 @@ if [ "$GGUF" = 1 ]; then
     [ -f "$TCPP_LIB" ] || TCPP_LIB="$(find "$TCPP/build" -name libtranscribe.so | head -1)"
     echo
     echo "transcribe.cpp library: $TCPP_LIB"
+    echo "CLI (test a .wav):      $TCPP/build/bin/transcribe-cli"
+    echo "quantize (e.g. Q8_0 -> Q5_K_M): $TCPP/build/bin/transcribe-quantize"
 fi
 
 echo
