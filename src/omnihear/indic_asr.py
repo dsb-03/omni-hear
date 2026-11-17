@@ -371,8 +371,15 @@ class GgufEngine:
             max_ms = int(caps.max_audio_ms or 0)
             self.max_seconds = (min(MAX_SECONDS, max_ms / 1000)
                                 if max_ms > 1000 else MAX_SECONDS)
+            # Mixed output needs the Indic itn slot (transcribe.cpp only
+            # advertises "itn" on Indic-Transcribe GGUFs); romanized needs
+            # "<lang>-Latn" codes in the file's language list, which the
+            # language gate checks (convert-indic-canary.py adds them).
             self._itn = self.model.supports("itn")
             self._vocab = self.model.supports("vocabulary")
+            self.base_languages = tuple(l for l in self.languages
+                                        if not l.endswith("-Latn"))
+            self._warned = set()
         except Exception:
             self.close()
             raise
@@ -380,6 +387,17 @@ class GgufEngine:
             self.precision = "gguf on " + str(self.model.device.name)
         except Exception:
             pass
+        modes = ["native"] + (["mixed"] if self._itn else [])
+        if any(l.endswith("-Latn") for l in self.languages):
+            modes.append("roman")
+        self.modes = tuple(modes)
+        print(f"omnihear: GGUF output scripts: {', '.join(self.modes)}; "
+              f"languages: {', '.join(self.base_languages) or '?'}")
+
+    def _warn_once(self, key, msg):
+        if key not in self._warned:
+            self._warned.add(key)
+            print("omnihear: " + msg)
 
     def close(self):
         for obj in (getattr(self, "session", None), getattr(self, "model", None)):
@@ -398,12 +416,24 @@ class GgufEngine:
             return {}
         if self.languages and language not in self.languages:
             raise RuntimeError(f"language {language!r} is not in this model "
-                               f"({', '.join(self.languages)})")
+                               f"({', '.join(self.base_languages)})")
         opts = {"language": language}
-        if self.output == "roman":
+        output = self.output
+        if output == "roman" and f"{language}-Latn" not in self.languages:
+            output = "mixed" if self._itn else "native"
+            self._warn_once("roman", (
+                f"this .gguf has no romanized mode for {language!r} (its "
+                f"language list has no '{language}-Latn'); using {output}. "
+                "Re-convert with transcribe.cpp's "
+                "scripts/convert-indic-canary.py to get it."))
+        if output == "mixed" and not self._itn:
+            output = "native"
+            self._warn_once("mixed", "this .gguf has no mixed-script mode; "
+                            "using native")
+        if output == "roman":
             opts["language"] = f"{language}-Latn"
         elif self._itn:
-            opts["itn"] = "on" if self.output == "mixed" else "off"
+            opts["itn"] = "on" if output == "mixed" else "off"
         return opts
 
     def transcribe(self, audio, language=None, vocabulary=None):
