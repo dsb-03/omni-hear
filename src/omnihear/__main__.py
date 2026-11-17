@@ -20,7 +20,12 @@ def build_parser(cfg: dict) -> argparse.ArgumentParser:
                         "languages; needs PyTorch, see --doctor).")
     p.add_argument("--indic-model", default=cfg["indic_model"],
                    help="Hugging Face repo of the Indic-Transcribe model "
-                        "(gated: accept its license and `hf auth login`).")
+                        "(gated: accept its license and `hf auth login`), or "
+                        "a path to a .gguf conversion (runs on transcribe.cpp, "
+                        "no PyTorch).")
+    p.add_argument("--indic-library", default=cfg["indic_library"],
+                   help="With a .gguf --indic-model: path to transcribe.cpp's "
+                        "libtranscribe.so (default: $TRANSCRIBE_LIBRARY).")
     p.add_argument("--indic-quantize", default=cfg["indic_quantize"],
                    choices=list(config_mod.INDIC_QUANTIZE_MODES),
                    help="Indic engine precision: auto = int8 on CPU, fp16 "

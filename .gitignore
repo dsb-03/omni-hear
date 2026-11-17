@@ -16,3 +16,6 @@ __pycache__/
 
 # Windows build artifact (written by release.yml, read by update_check.py)
 windows/VERSION
+
+# transcribe.cpp checkout + build from scripts/dev-setup.sh --gguf
+/.transcribe.cpp/

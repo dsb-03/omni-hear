@@ -1976,7 +1976,7 @@ const BETA_KEYS = ['brain','brain_autocorrect','brain_hotwords','brain_min_count
   'ask_hotkey','ask_context_limit'];
 const SECTIONS = [
   ['Transcription Engine', ['asr_backend','model','language','device','compute_type','beam_size']],
-  ['Indian languages engine (beta)', ['indic_model','indic_quantize','indic_output']],
+  ['Indian languages engine (beta)', ['indic_model','indic_quantize','indic_output','indic_library']],
   ['Input & Trigger', ['hotkey','sample_rate','min_duration','type_method']],
   ['Dictation (new)', ['hands_free','max_recording_seconds','paste_last_hotkey','cleanup']],
   ['Local AI editing (new)', ['command_hotkey','ask_model','cleanup_model','smart_cleanup_ms']],
@@ -1990,8 +1990,9 @@ const SECTIONS = [
 
 const HELP = {
   asr_backend: 'whisper: faster-whisper (default). indic (beta): Bodhan AI Indic-Transcribe, for Indian languages and accents. It needs PyTorch installed separately and about 2.5 GB of RAM on CPU; run omnihear --doctor for the install command. Whisper-only options (model, compute type, beam size, hallucination filtering, vocabulary hints) do not apply to it.',
-  indic_model: 'Hugging Face model for the indic engine. flex: 27 languages, auto-detects, native/mixed/roman output. core: 25 languages, native script, needs a fixed language. Both are gated: accept the license on huggingface.co and run hf auth login once.',
-  indic_quantize: 'Indic engine precision. auto: int8 on CPU (about half the memory, slight accuracy cost), fp16 on CUDA. off: float32, most accurate and heaviest.',
+  indic_model: 'Hugging Face model for the indic engine. flex: 27 languages, auto-detects, native/mixed/roman output. core: 25 languages, native script, needs a fixed language. Both are gated: accept the license on huggingface.co and run hf auth login once. Or the full path to a .gguf file (e.g. indic-transcribe-flex Q5_K_M): it runs on transcribe.cpp instead of PyTorch, uses far less memory, and needs a fixed language.',
+  indic_library: 'Only for a .gguf model: path to the transcribe.cpp library, libtranscribe.so (built with -DTRANSCRIBE_BUILD_SHARED=ON). Empty uses the TRANSCRIBE_LIBRARY environment variable.',
+  indic_quantize: 'PyTorch models only (a .gguf file is already quantized). Indic engine precision. auto: int8 on CPU (about half the memory, slight accuracy cost), fp16 on CUDA. off: float32, most accurate and heaviest.',
   indic_output: 'Indic engine output script (flex model): native (e.g. Devanagari), mixed (English words in Latin script), or roman (romanized, e.g. Hinglish).',
   model: 'faster-whisper model to load. Bigger = more accurate but slower and more memory.',
   language: 'Language spoken in the audio. Auto-detect adds latency; pick a fixed language if you know it.',
@@ -2052,7 +2053,7 @@ const HELP = {
   overlay_bar_height: 'Height of the tallest waveform bar, before scaling. The container grows to fit.',
   overlay_bar_shape: 'Waveform bars with rounded ends, or square ends.',
 };
-const FIELD_LABELS = {asr_backend: 'speech engine', indic_model: 'model (Hugging Face)', indic_quantize: 'quantize', indic_output: 'output script', ask_model: 'Command Mode / Q&A model (Ollama)', cleanup_model: 'smart cleanup model (Ollama)', smart_cleanup_ms: 'smart cleanup budget (ms)'};
+const FIELD_LABELS = {asr_backend: 'speech engine', indic_model: 'model (HF repo or .gguf path)', indic_library: 'libtranscribe path (GGUF)', indic_quantize: 'quantize', indic_output: 'output script', ask_model: 'Command Mode / Q&A model (Ollama)', cleanup_model: 'smart cleanup model (Ollama)', smart_cleanup_ms: 'smart cleanup budget (ms)'};
 const pretty = k => OVERLAY_LABELS[k] || FIELD_LABELS[k] || k.replace(/_/g, ' ');
 const prettyOpt = o => o.replace(/_/g, ' ');
 const keyDisplay = hk => String(hk).split('+').filter(Boolean)

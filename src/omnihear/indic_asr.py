@@ -24,6 +24,18 @@ downloaded snapshot (the same trust as `trust_remote_code`). A repo without
 it but with a `.nemo` checkpoint is loaded through NVIDIA NeMo if installed.
 The exact constructor/transcribe signatures are matched by introspection,
 since they are not documented beyond the card's example.
+
+GGUF (`indic_model` = a path to a `.gguf` file): GgufEngine runs a ggml
+conversion (e.g. indic-transcribe-flex Q5_K_M, ~850 MB) through transcribe.cpp
+(github.com/handy-computer/transcribe.cpp; Indic-Transcribe support is PR
+#245) via its pure-Python ctypes bindings (`transcribe_cpp`), so the model
+stays loaded between dictations and no PyTorch is needed. The shared library
+(`libtranscribe.so`, built with -DTRANSCRIBE_BUILD_SHARED=ON) is found via
+`indic_library`, $TRANSCRIBE_LIBRARY or the bindings' own discovery. The
+compute backend is the library's "auto" choice (GPU if it was built with one;
+$TRANSCRIBE_BACKEND=cpu forces CPU). transcribe.cpp's canary has no language
+auto-detect, so a fixed `language` is required. Output script maps to the
+PR's controls: native = itn off, mixed = itn on, roman = "<lang>-Latn".
 """
 
 from __future__ import annotations
@@ -54,6 +66,19 @@ def install_command() -> str:
     """The pip command for the Python omnihear runs on (the .deb's venv in
     /opt/omnihear on Linux, which needs sudo)."""
     cmd = f"{sys.executable} -m {INSTALL_HINT}"
+    return ("sudo " + cmd) if sys.prefix.startswith("/opt/omnihear") else cmd
+
+
+GGUF_MODULE = "transcribe_cpp"
+
+
+def is_gguf(model: str) -> bool:
+    return str(model or "").lower().endswith(".gguf")
+
+
+def gguf_install_command() -> str:
+    cmd = (f"{sys.executable} -m pip install "
+           "<transcribe.cpp checkout>/bindings/python")
     return ("sudo " + cmd) if sys.prefix.startswith("/opt/omnihear") else cmd
 
 
@@ -281,9 +306,10 @@ class IndicEngine:
                 except OSError:
                     pass
 
-    def transcribe(self, audio, language=None):
+    def transcribe(self, audio, language=None, vocabulary=None):
         """(text, Info) for 16 kHz mono float32 audio. `language` is an
-        ISO code, or None to let the model detect it (flex only)."""
+        ISO code, or None to let the model detect it (flex only).
+        `vocabulary` is unused (no hint input on this runtime)."""
         import torch
         texts, detected = [], None
         with self._lock, torch.inference_mode():
@@ -307,7 +333,106 @@ class IndicEngine:
         return " ".join(texts), Info(lang, 1.0 if lang else 0.0)
 
 
-def load(cfg: dict) -> IndicEngine:
+class GgufEngine:
+    """An Indic-Transcribe GGUF loaded through transcribe.cpp's bindings.
+    Same interface as IndicEngine. One session, reused; app.py calls it from
+    its single worker thread only."""
+
+    def __init__(self, path: str, output: str = "native", library: str = ""):
+        path = os.path.expanduser(path)
+        if not os.path.isfile(path):
+            raise RuntimeError(f"GGUF model not found: {path}")
+        if library:
+            library = os.path.expanduser(library)
+            if not os.path.isfile(library):
+                raise RuntimeError(f"indic_library not found: {library}")
+            # Read by the bindings when they first load the library.
+            os.environ["TRANSCRIBE_LIBRARY"] = library
+        if importlib.util.find_spec(GGUF_MODULE) is None:
+            raise RuntimeError("GGUF models need transcribe.cpp's Python "
+                               f"bindings — {gguf_install_command()}")
+        try:
+            import transcribe_cpp
+        except Exception as e:  # library not found / ABI mismatch
+            raise RuntimeError(
+                f"could not load transcribe.cpp ({e}); build it with "
+                "-DTRANSCRIBE_BUILD_SHARED=ON and set indic_library to "
+                "build/.../libtranscribe.so") from e
+        self.repo = path
+        self.output = output if output in OUTPUT_SCRIPTS else "native"
+        self.precision = "gguf"
+        self._lock = threading.Lock()
+        self.model = transcribe_cpp.Model(path)
+        try:
+            self.session = self.model.session()
+            caps = self.model.capabilities
+            self.languages = tuple(caps.languages)
+            self.auto_language = bool(caps.supports_language_detect)
+            max_ms = int(caps.max_audio_ms or 0)
+            self.max_seconds = (min(MAX_SECONDS, max_ms / 1000)
+                                if max_ms > 1000 else MAX_SECONDS)
+            self._itn = self.model.supports("itn")
+            self._vocab = self.model.supports("vocabulary")
+        except Exception:
+            self.close()
+            raise
+        try:
+            self.precision = "gguf on " + str(self.model.device.name)
+        except Exception:
+            pass
+
+    def close(self):
+        for obj in (getattr(self, "session", None), getattr(self, "model", None)):
+            try:
+                if obj is not None:
+                    obj.close()
+            except Exception:
+                pass
+
+    def _run_options(self, language):
+        if not language:
+            if not self.auto_language:
+                raise RuntimeError(
+                    "this GGUF model can't detect the language — set a fixed "
+                    "language in Settings (e.g. hi for Hindi/Hinglish)")
+            return {}
+        if self.languages and language not in self.languages:
+            raise RuntimeError(f"language {language!r} is not in this model "
+                               f"({', '.join(self.languages)})")
+        opts = {"language": language}
+        if self.output == "roman":
+            opts["language"] = f"{language}-Latn"
+        elif self._itn:
+            opts["itn"] = "on" if self.output == "mixed" else "off"
+        return opts
+
+    def transcribe(self, audio, language=None, vocabulary=None):
+        import numpy as np
+        opts = self._run_options(language)
+        if vocabulary and self._vocab:
+            opts["vocabulary"] = list(vocabulary)[:50]
+        texts, detected = [], None
+        with self._lock:
+            for piece in split_windows(audio, self.max_seconds):
+                if len(piece) < SAMPLE_RATE // 10:
+                    continue
+                result = self.session.run(
+                    np.ascontiguousarray(piece, dtype=np.float32),
+                    timestamps="none", **opts)
+                if result.text.strip():
+                    texts.append(result.text.strip())
+                detected = detected or (result.language or None)
+        lang = language or detected
+        if lang and lang.endswith("-Latn"):
+            lang = lang[:-5]
+        return " ".join(texts), Info(lang, 1.0 if lang else 0.0)
+
+
+def load(cfg: dict):
+    model = cfg.get("indic_model") or DEFAULT_MODEL
+    if is_gguf(model):
+        return GgufEngine(model, output=cfg.get("indic_output", "native"),
+                          library=cfg.get("indic_library", ""))
     return IndicEngine(cfg.get("indic_model") or DEFAULT_MODEL,
                        device=cfg.get("device", "cpu"),
                        quantize=cfg.get("indic_quantize", "auto"),

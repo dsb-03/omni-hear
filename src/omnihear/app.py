@@ -459,9 +459,7 @@ class App:
         with self._model_lock:
             if self._model is None and self._indic:
                 from . import indic_asr
-                print(f"Loading Indic-Transcribe '{self._model_label()}' on "
-                      f"{self.cfg['device']} (quantize "
-                      f"{self.cfg.get('indic_quantize', 'auto')})...")
+                print(f"Loading Indic-Transcribe '{self._model_label()}'...")
                 if self.feedback:
                     self.feedback.notify("omnihear", "Loading Indic speech model…")
                 self._model = indic_asr.load(self.cfg)
@@ -501,6 +499,8 @@ class App:
                 if (self._model is not None
                         and time.monotonic() - self._last_used > timeout):
                     print("Idle timeout: unloading model to free RAM.")
+                    if self._indic and hasattr(self._model, "close"):
+                        self._model.close()  # GGUF: free native memory now
                     self._model = None
                     gc.collect()
 
@@ -1215,10 +1215,13 @@ class App:
         if language is None and not auto:
             language = self.cfg["language"]
         if self._indic:
-            # Indic-Transcribe has no prompt/hotword/VAD options: vocabulary
-            # and dictionary still apply after transcription, and chunks
-            # stay coherent by pinning the language. No per-segment scores.
-            text, info = model.transcribe(audio, language=language)
+            # Indic-Transcribe has no prompt/hotword/VAD options (a GGUF
+            # model gets vocabulary hints where transcribe.cpp supports
+            # them); the dictionary still applies after transcription, and
+            # chunks stay coherent by pinning the language. No per-segment
+            # scores.
+            text, info = model.transcribe(audio, language=language,
+                                          vocabulary=self._vocab_hints())
             return text.strip(), [], info
         whisper = bool(self.cfg.get("whisper_mode"))
         kwargs = dict(

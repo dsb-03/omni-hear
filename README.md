@@ -116,6 +116,25 @@ It is optional and heavy, so nothing is installed by default:
 | `indic_quantize = "auto"` | int8 on CPU (about 2.5 GB RAM instead of ~5–6 GB, slight accuracy cost), fp16 on CUDA. `off` = float32. |
 | `indic_output = "native"` | Flex only: `native` script, `mixed` (English words in Latin script), or `roman` (romanized). |
 
+### GGUF models (no PyTorch)
+
+A GGUF conversion of the model (e.g. `indic_transcribe_flex-q5_k_m.gguf`,
+about 850 MB) runs on [transcribe.cpp](https://github.com/handy-computer/transcribe.cpp)
+instead: much less memory, no PyTorch, and the model stays loaded between
+dictations. Indic-Transcribe support is still an open pull request there
+(handy-computer/transcribe.cpp#245), so build that branch as a shared library
+and install its Python bindings — from a checkout of this repo:
+
+```bash
+./scripts/dev-setup.sh /path/to/indic_transcribe_flex-q5_k_m.gguf
+```
+
+(add `--vulkan` for an AMD/Intel GPU; CUDA is used when `nvcc` is found.)
+Then set `indic_model` to the `.gguf` path and `indic_library` to the built
+`libtranscribe.so`. transcribe.cpp can't auto-detect the language for this
+model, so set a fixed `language` (e.g. `hi`). `indic_output` works as above;
+`indic_quantize` doesn't apply (the file is already quantized).
+
 It is a ~1.2B-parameter model: comfortable on an NVIDIA GPU or a recent
 laptop, slower than Whisper `base`/`small` on CPU. Whisper-only settings
 (model, compute type, beam size, hallucination filtering, vocabulary hints)

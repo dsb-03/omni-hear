@@ -200,6 +200,9 @@ DEFAULTS = {
     "indic_model": INDIC_DEFAULT_MODEL,
     "indic_quantize": "auto",      # auto = int8 on CPU, fp16 on CUDA
     "indic_output": "native",      # flex: native / mixed / roman script
+    # indic_model = a .gguf path: transcribe.cpp's libtranscribe.so ("" =
+    # $TRANSCRIBE_LIBRARY or the bindings' own discovery).
+    "indic_library": "",
     "code_switching": False,       # language = auto: allow mid-dictation switches
     # Recording overlay look and placement (see overlay_anim.Style).
     "overlay_scale": 1.5,
@@ -383,6 +386,8 @@ def validate_updates(updates: dict) -> tuple[dict, list[str]]:
                 del clean[key]
     if "indic_model" in clean:
         clean["indic_model"] = clean["indic_model"].strip() or INDIC_DEFAULT_MODEL
+    if "indic_library" in clean:
+        clean["indic_library"] = clean["indic_library"].strip()
     if "cleanup" in clean:
         lvl = clean["cleanup"].strip().lower()
         if lvl in CLEANUP_LEVELS:

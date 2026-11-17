@@ -100,6 +100,8 @@ def _ram_gb() -> float | None:
 def _indic_rows(cfg: dict) -> list[tuple[str, str, str]]:
     """asr_backend = "indic": optional deps, model access, hardware."""
     from . import indic_asr
+    if indic_asr.is_gguf(cfg.get("indic_model", "")):
+        return _gguf_rows(cfg)
     rows = []
     missing = indic_asr.missing_modules()
     if missing:
@@ -142,6 +144,37 @@ def _indic_rows(cfg: dict) -> list[tuple[str, str, str]]:
         rows.append((OK if ok else WARN, "Indic engine", f"CUDA, {precision}"
                      if ok else "device = cuda but PyTorch sees no GPU; "
                      "it will run on CPU"))
+    return rows
+
+
+def _gguf_rows(cfg: dict) -> list[tuple[str, str, str]]:
+    """indic_model = a .gguf file on transcribe.cpp."""
+    from . import indic_asr
+    rows = []
+    path = os.path.expanduser(cfg.get("indic_model", ""))
+    if os.path.isfile(path):
+        rows.append((OK, "Indic GGUF model",
+                     f"{path} ({os.path.getsize(path) / 1024 ** 2:.0f} MB)"))
+    else:
+        rows.append((FAIL, "Indic GGUF model", f"file not found: {path}"))
+    lib = os.path.expanduser(cfg.get("indic_library", "")
+                             or os.environ.get("TRANSCRIBE_LIBRARY", ""))
+    if lib and not os.path.isfile(lib):
+        rows.append((FAIL, "transcribe.cpp library", f"not found: {lib}"))
+    elif lib:
+        rows.append((OK, "transcribe.cpp library", lib))
+    else:
+        rows.append((WARN, "transcribe.cpp library", "indic_library not set; "
+                     "relying on the bindings' discovery — set it to "
+                     "build/.../libtranscribe.so if loading fails"))
+    if importlib.util.find_spec(indic_asr.GGUF_MODULE) is None:
+        rows.append((FAIL, "transcribe.cpp bindings",
+                     f"missing — `{indic_asr.gguf_install_command()}`"))
+    else:
+        rows.append((OK, "transcribe.cpp bindings", "installed"))
+    if cfg.get("language", "auto") in ("", "auto"):
+        rows.append((FAIL, "Indic language", "GGUF models can't auto-detect "
+                     "the language — set one (Settings > language, e.g. hi)"))
     return rows
 
 
