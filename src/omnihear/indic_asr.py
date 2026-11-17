@@ -142,10 +142,10 @@ def _parse(result):
     return text, lang
 
 
-def _write_wav(audio) -> str:
+def _write_wav(audio, directory=None) -> str:
     import numpy as np
     pcm = (np.clip(audio, -1.0, 1.0) * 32767).astype("<i2").tobytes()
-    fd, path = tempfile.mkstemp(prefix="omnihear-", suffix=".wav")
+    fd, path = tempfile.mkstemp(prefix="omnihear-", suffix=".wav", dir=directory)
     with os.fdopen(fd, "wb") as f, wave.open(f, "wb") as w:
         w.setnchannels(1)
         w.setsampwidth(2)
@@ -450,7 +450,11 @@ class GgufEngine:
 
     def transcribe(self, audio, language=None, vocabulary=None):
         import numpy as np
+        import transcribe_cpp
         opts = self._run_options(language)
+        # Debugging: OMNIHEAR_DUMP_AUDIO=<dir> saves each piece exactly as
+        # sent to the model (16 kHz mono WAV), to replay with transcribe-cli.
+        dump = os.environ.get("OMNIHEAR_DUMP_AUDIO")
         if vocabulary and self._vocab:
             opts["vocabulary"] = list(vocabulary)[:50]
         texts, detected = [], None
@@ -458,9 +462,25 @@ class GgufEngine:
             for piece in split_windows(audio, self.max_seconds):
                 if len(piece) < SAMPLE_RATE // 10:
                     continue
-                result = self.session.run(
-                    np.ascontiguousarray(piece, dtype=np.float32),
-                    timestamps="none", **opts)
+                pcm = np.ascontiguousarray(piece, dtype=np.float32)
+                if dump:
+                    os.makedirs(os.path.expanduser(dump), exist_ok=True)
+                    path = _write_wav(pcm, os.path.expanduser(dump))
+                    print(f"omnihear: audio saved to {path} "
+                          f"({len(pcm) / SAMPLE_RATE:.1f}s, peak "
+                          f"{float(np.abs(pcm).max()) if pcm.size else 0:.2f}; "
+                          f"options {opts})")
+                try:
+                    result = self.session.run(pcm, timestamps="none", **opts)
+                except transcribe_cpp.OutputTruncated as e:
+                    # Includes OutputRepetition: the model looped or hit the
+                    # length cap. Keep what it produced before that.
+                    result = e.partial_result
+                    print(f"omnihear: {type(e).__name__}; keeping the partial "
+                          f"transcript ({result.text.strip()!r})" if result
+                          else f"omnihear: {type(e).__name__}, no partial text")
+                    if result is None:
+                        continue
                 if result.text.strip():
                     texts.append(result.text.strip())
                 detected = detected or (result.language or None)
