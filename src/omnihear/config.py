@@ -71,6 +71,14 @@ OVERLAY_RANGES = {
 OVERLAY_COLOR_KEYS = ("overlay_bg_color", "overlay_bar_color", "overlay_dot_color")
 
 
+# Speech engines. "indic" (beta) = Bodhan AI Indic-Transcribe (indic_asr.py,
+# optional PyTorch deps); its option lists live there (stdlib at import).
+from .indic_asr import (DEFAULT_MODEL as INDIC_DEFAULT_MODEL,  # noqa: E402
+                        QUANTIZE_MODES as INDIC_QUANTIZE_MODES,
+                        OUTPUT_SCRIPTS as INDIC_OUTPUT_SCRIPTS)
+ASR_BACKENDS = ("whisper", "indic")
+
+
 # Text cleanup levels applied to dictation (see cleanup.py).
 CLEANUP_LEVELS = ("off", "light", "smart")  # smart = light + local LLM polish (llm.py)
 
@@ -140,6 +148,7 @@ LANGUAGE_NAMES = {
 }
 
 DEFAULTS = {
+    "asr_backend": "whisper",      # "indic" (beta): Bodhan AI Indic-Transcribe
     "model": "base.en",
     "device": "cpu",
     "compute_type": "int8",
@@ -187,6 +196,10 @@ DEFAULTS = {
     "chunked_transcription": False,  # transcribe long dictations at pauses
     "chunk_seconds": 10,           # min audio per chunk before cutting
     "whisper_mode": False,         # quiet-speech profile
+    # asr_backend = "indic" (beta, indic_asr.py).
+    "indic_model": INDIC_DEFAULT_MODEL,
+    "indic_quantize": "auto",      # auto = int8 on CPU, fp16 on CUDA
+    "indic_output": "native",      # flex: native / mixed / roman script
     "code_switching": False,       # language = auto: allow mid-dictation switches
     # Recording overlay look and placement (see overlay_anim.Style).
     "overlay_scale": 1.5,
@@ -358,6 +371,18 @@ def validate_updates(updates: dict) -> tuple[dict, list[str]]:
                 errors.append("paste_last_hotkey must be known key names or "
                               "single characters, joined with '+' for combos")
                 del clean["paste_last_hotkey"]
+    for key, allowed in (("asr_backend", ASR_BACKENDS),
+                         ("indic_quantize", INDIC_QUANTIZE_MODES),
+                         ("indic_output", INDIC_OUTPUT_SCRIPTS)):
+        if key in clean:
+            v = clean[key].strip().lower()
+            if v in allowed:
+                clean[key] = v
+            else:
+                errors.append(f"{key} must be one of: " + ", ".join(allowed))
+                del clean[key]
+    if "indic_model" in clean:
+        clean["indic_model"] = clean["indic_model"].strip() or INDIC_DEFAULT_MODEL
     if "cleanup" in clean:
         lvl = clean["cleanup"].strip().lower()
         if lvl in CLEANUP_LEVELS:

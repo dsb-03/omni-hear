@@ -13,6 +13,22 @@ def build_parser(cfg: dict) -> argparse.ArgumentParser:
         description="Push-to-talk local Whisper transcription (Linux X11/Wayland, Windows, macOS).",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
+    p.add_argument("--asr-backend", default=cfg["asr_backend"],
+                   choices=list(config_mod.ASR_BACKENDS),
+                   help="Speech engine: whisper (faster-whisper), or indic "
+                        "(beta: Bodhan AI Indic-Transcribe for Indian "
+                        "languages; needs PyTorch, see --doctor).")
+    p.add_argument("--indic-model", default=cfg["indic_model"],
+                   help="Hugging Face repo of the Indic-Transcribe model "
+                        "(gated: accept its license and `hf auth login`).")
+    p.add_argument("--indic-quantize", default=cfg["indic_quantize"],
+                   choices=list(config_mod.INDIC_QUANTIZE_MODES),
+                   help="Indic engine precision: auto = int8 on CPU, fp16 "
+                        "on CUDA; off = float32.")
+    p.add_argument("--indic-output", default=cfg["indic_output"],
+                   choices=list(config_mod.INDIC_OUTPUT_SCRIPTS),
+                   help="Indic engine output script (flex model): native, "
+                        "mixed, or roman (romanized).")
     p.add_argument("--model", default=cfg["model"],
                    help="Whisper model size: tiny.en, base.en, small.en, "
                         "medium.en, large-v3, etc.")

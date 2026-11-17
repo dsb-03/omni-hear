@@ -1918,6 +1918,8 @@ const MODELS = __MODELS__;
 const LANGUAGE_NAMES = __LANGS__;
 const TYPE_METHODS = __TYPE_METHODS__;
 const CLEANUP_LEVELS = __CLEANUP_LEVELS__;
+// Speech engines and Indic engine options, from config.py / indic_asr.py.
+const ASR = __ASR__;
 // Overlay option lists, ranges and base geometry, from overlay_anim.py.
 const OV = __OVERLAY__;
 const LANGUAGES = [['auto','Auto-detect Language']].concat(
@@ -1973,7 +1975,8 @@ const BETA_KEYS = ['brain','brain_autocorrect','brain_hotwords','brain_min_count
   'voice_commands','terminal_commands','rag_context','rag_context_limit',
   'ask_hotkey','ask_context_limit'];
 const SECTIONS = [
-  ['Transcription Engine', ['model','language','device','compute_type','beam_size']],
+  ['Transcription Engine', ['asr_backend','model','language','device','compute_type','beam_size']],
+  ['Indian languages engine (beta)', ['indic_model','indic_quantize','indic_output']],
   ['Input & Trigger', ['hotkey','sample_rate','min_duration','type_method']],
   ['Dictation (new)', ['hands_free','max_recording_seconds','paste_last_hotkey','cleanup']],
   ['Local AI editing (new)', ['command_hotkey','ask_model','cleanup_model','smart_cleanup_ms']],
@@ -1986,6 +1989,10 @@ const SECTIONS = [
 ];
 
 const HELP = {
+  asr_backend: 'whisper: faster-whisper (default). indic (beta): Bodhan AI Indic-Transcribe, for Indian languages and accents. It needs PyTorch installed separately and about 2.5 GB of RAM on CPU; run omnihear --doctor for the install command. Whisper-only options (model, compute type, beam size, hallucination filtering, vocabulary hints) do not apply to it.',
+  indic_model: 'Hugging Face model for the indic engine. flex: 27 languages, auto-detects, native/mixed/roman output. core: 25 languages, native script, needs a fixed language. Both are gated: accept the license on huggingface.co and run hf auth login once.',
+  indic_quantize: 'Indic engine precision. auto: int8 on CPU (about half the memory, slight accuracy cost), fp16 on CUDA. off: float32, most accurate and heaviest.',
+  indic_output: 'Indic engine output script (flex model): native (e.g. Devanagari), mixed (English words in Latin script), or roman (romanized, e.g. Hinglish).',
   model: 'faster-whisper model to load. Bigger = more accurate but slower and more memory.',
   language: 'Language spoken in the audio. Auto-detect adds latency; pick a fixed language if you know it.',
   device: 'Run inference on CPU or an NVIDIA GPU (cuda).',
@@ -2045,7 +2052,7 @@ const HELP = {
   overlay_bar_height: 'Height of the tallest waveform bar, before scaling. The container grows to fit.',
   overlay_bar_shape: 'Waveform bars with rounded ends, or square ends.',
 };
-const FIELD_LABELS = {ask_model: 'Command Mode / Q&A model (Ollama)', cleanup_model: 'smart cleanup model (Ollama)', smart_cleanup_ms: 'smart cleanup budget (ms)'};
+const FIELD_LABELS = {asr_backend: 'speech engine', indic_model: 'model (Hugging Face)', indic_quantize: 'quantize', indic_output: 'output script', ask_model: 'Command Mode / Q&A model (Ollama)', cleanup_model: 'smart cleanup model (Ollama)', smart_cleanup_ms: 'smart cleanup budget (ms)'};
 const pretty = k => OVERLAY_LABELS[k] || FIELD_LABELS[k] || k.replace(/_/g, ' ');
 const prettyOpt = o => o.replace(/_/g, ' ');
 const keyDisplay = hk => String(hk).split('+').filter(Boolean)
@@ -2076,6 +2083,9 @@ function fieldHtml(k, v) {
   if (k === 'type_method') return selectOf(k, TYPE_METHODS, v);
   if (k === 'cleanup') return selectOf(k, CLEANUP_LEVELS, v);
   if (k === 'compute_type') return selectOf(k, COMPUTE_TYPES, v);
+  if (k === 'asr_backend') return selectOf(k, ASR.backends, v);
+  if (k === 'indic_quantize') return selectOf(k, ASR.quantize, v);
+  if (k === 'indic_output') return selectOf(k, ASR.outputs, v);
   if (k in OVERLAY_CHOICES)
     return `<label${titleAttr(k)}>${esc(pretty(k))}<select name="${k}">` +
       OVERLAY_CHOICES[k].map(o =>
@@ -3189,6 +3199,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
                              json.dumps(config_mod.MODEL_NAMES))
                     .replace("__LANGS__",
                              json.dumps(config_mod.LANGUAGE_NAMES))
+                    .replace("__ASR__", json.dumps({
+                        "backends": list(config_mod.ASR_BACKENDS),
+                        "quantize": list(config_mod.INDIC_QUANTIZE_MODES),
+                        "outputs": list(config_mod.INDIC_OUTPUT_SCRIPTS)}))
                     .replace("__CLEANUP_LEVELS__",
                              json.dumps(list(config_mod.CLEANUP_LEVELS)))
                     .replace("__PLATFORM__", json.dumps(sys.platform))

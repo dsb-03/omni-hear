@@ -86,6 +86,41 @@ The dashboard also has a **Setup** tab, a first-run wizard that checks your
 setup, tests the hotkey and microphone live, and confirms a practice
 dictation lands. Every transcript in the dashboard has a **Copy** button.
 
+## Indian languages engine (beta)
+
+`asr_backend = "indic"` swaps Whisper for Bodhan AI's open-weight
+[Indic-Transcribe](https://huggingface.co/bodhan-ai/indic-transcribe-flex)
+models (IIT Madras / AI4Bharat), which are much stronger on Indian languages,
+accents and Hinglish. Still local: the model runs on your machine.
+
+It is optional and heavy, so nothing is installed by default:
+
+1. Install PyTorch and friends into omnihear's Python (`omnihear --doctor`
+   prints the exact command for your install; for the `.deb`):
+
+   ```bash
+   sudo /opt/omnihear/venv/bin/pip install torch torchaudio transformers sentencepiece soundfile
+   ```
+
+   No NVIDIA GPU? Add `--index-url https://download.pytorch.org/whl/cpu
+   --extra-index-url https://pypi.org/simple` for a much smaller CPU-only
+   PyTorch.
+2. The models are gated: accept the license on the model page, then log in
+   once with `hf auth login` (or set `HF_TOKEN`).
+3. Settings → Transcription Engine → Speech engine = `indic`, or
+   `omnihear --asr-backend indic`.
+
+| Setting | What it does |
+|---|---|
+| `indic_model` | `bodhan-ai/indic-transcribe-flex` (27 languages, auto-detect, native/mixed/roman output) or `bodhan-ai/indic-transcribe-core` (25 languages, native script, set a fixed `language`). |
+| `indic_quantize = "auto"` | int8 on CPU (about 2.5 GB RAM instead of ~5–6 GB, slight accuracy cost), fp16 on CUDA. `off` = float32. |
+| `indic_output = "native"` | Flex only: `native` script, `mixed` (English words in Latin script), or `roman` (romanized). |
+
+It is a ~1.2B-parameter model: comfortable on an NVIDIA GPU or a recent
+laptop, slower than Whisper `base`/`small` on CPU. Whisper-only settings
+(model, compute type, beam size, hallucination filtering, vocabulary hints)
+don't apply; the personal dictionary, snippets, cleanup and styles do.
+
 ## Running as a service
 
 ```bash

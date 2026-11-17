@@ -425,7 +425,8 @@ class App:
         paste_last = self.cfg.get("paste_last_hotkey") or ""
         cmd = self.cfg.get("command_hotkey") or ""
         return {
-            "model": self.cfg["model"],
+            "model": self._model_label(),
+            "asr_backend": self.cfg.get("asr_backend", "whisper"),
             "hotkey": self.cfg["hotkey"],
             "hotkey_display": config_mod.hotkey_display(self.cfg["hotkey"]),
             "ask_hotkey_display": config_mod.hotkey_display(ask) if ask else "",
@@ -456,7 +457,16 @@ class App:
     # -- model lifecycle ---------------------------------------------
     def _get_model(self):
         with self._model_lock:
-            if self._model is None:
+            if self._model is None and self._indic:
+                from . import indic_asr
+                print(f"Loading Indic-Transcribe '{self._model_label()}' on "
+                      f"{self.cfg['device']} (quantize "
+                      f"{self.cfg.get('indic_quantize', 'auto')})...")
+                if self.feedback:
+                    self.feedback.notify("omnihear", "Loading Indic speech model…")
+                self._model = indic_asr.load(self.cfg)
+                print(f"Model loaded ({self._model.precision}).")
+            elif self._model is None:
                 from faster_whisper import WhisperModel
                 print(f"Loading Whisper model '{self.cfg['model']}' on "
                       f"{self.cfg['device']} ({self.cfg['compute_type']})...")
@@ -470,6 +480,16 @@ class App:
                 print("Model loaded.")
             self._last_used = time.monotonic()
             return self._model
+
+    @property
+    def _indic(self) -> bool:
+        return self.cfg.get("asr_backend") == "indic"
+
+    def _model_label(self) -> str:
+        """Model name for status and history."""
+        if self._indic:
+            return self.cfg.get("indic_model") or config_mod.INDIC_DEFAULT_MODEL
+        return self.cfg["model"]
 
     def _idle_unload_loop(self):
         timeout = self.cfg["idle_unload_minutes"] * 60
@@ -1194,6 +1214,12 @@ class App:
         auto = self.cfg["language"] in ("", "auto")
         if language is None and not auto:
             language = self.cfg["language"]
+        if self._indic:
+            # Indic-Transcribe has no prompt/hotword/VAD options: vocabulary
+            # and dictionary still apply after transcription, and chunks
+            # stay coherent by pinning the language. No per-segment scores.
+            text, info = model.transcribe(audio, language=language)
+            return text.strip(), [], info
         whisper = bool(self.cfg.get("whisper_mode"))
         kwargs = dict(
             language=language,
@@ -1412,7 +1438,7 @@ class App:
                 self.feedback.notify("omnihear", typed_text, urgency="normal")
         if self.db:
             try:
-                self.db.insert(text, duration, elapsed_ms, self.cfg["model"],
+                self.db.insert(text, duration, elapsed_ms, self._model_label(),
                                cpu_percent=cpu_percent, memory_mb=memory_mb,
                                avg_logprob=avg_logprob, no_speech_prob=no_speech_prob,
                                compression_ratio=compression_ratio,

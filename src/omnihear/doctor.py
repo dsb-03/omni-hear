@@ -83,6 +83,68 @@ def _llm_row(cfg: dict) -> tuple[str, str, str]:
     return (WARN, label, how)
 
 
+def _ram_gb() -> float | None:
+    try:
+        if sys.platform.startswith("linux"):
+            with open("/proc/meminfo") as f:
+                for line in f:
+                    if line.startswith("MemTotal:"):
+                        return int(line.split()[1]) / 1024 / 1024
+        elif hasattr(os, "sysconf"):
+            return os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / 1024 ** 3
+    except (OSError, ValueError):
+        pass
+    return None
+
+
+def _indic_rows(cfg: dict) -> list[tuple[str, str, str]]:
+    """asr_backend = "indic": optional deps, model access, hardware."""
+    from . import indic_asr
+    rows = []
+    missing = indic_asr.missing_modules()
+    if missing:
+        rows.append((FAIL, "Indic engine deps", "missing " + ", ".join(missing)
+                     + f" — `{indic_asr.install_command()}`"))
+    else:
+        rows.append((OK, "Indic engine deps", "torch, transformers installed"))
+    repo = cfg.get("indic_model") or indic_asr.DEFAULT_MODEL
+    if os.environ.get("HF_TOKEN"):
+        token = True
+    else:
+        home = os.environ.get("HF_HOME") or os.path.expanduser("~/.cache/huggingface")
+        token = os.path.exists(os.path.join(home, "token"))
+    rows.append((OK if token else WARN, "Indic model access",
+                 f"{repo} (Hugging Face token found)" if token else
+                 f"{repo} is gated — accept its license on huggingface.co, "
+                 "then `hf auth login` (or set HF_TOKEN)"))
+    if repo.endswith("-core") and cfg.get("language", "auto") in ("", "auto"):
+        rows.append((WARN, "Indic language", "the core model needs a fixed "
+                     "language (Settings > language); flex auto-detects"))
+    precision = indic_asr.resolve_precision(cfg.get("indic_quantize", "auto"),
+                                            cfg.get("device", "cpu"))
+    ram = _ram_gb()
+    if cfg.get("device") != "cuda":
+        need = {"int8": 2.5, "bf16": 3.5, "fp32": 6}.get(precision, 3.5)
+        # Leave ~4 GB for the desktop and a browser.
+        if ram is not None and ram < need + 4:
+            rows.append((WARN, "Indic engine memory",
+                         f"{ram:.0f} GB RAM; the model needs ~{need:g} GB at "
+                         f"{precision} on CPU and may be slow"))
+        else:
+            rows.append((OK, "Indic engine", f"CPU, {precision}"
+                         + (f", {ram:.0f} GB RAM" if ram else "")))
+    elif not missing:
+        try:
+            import torch
+            ok = torch.cuda.is_available()
+        except Exception:
+            ok = False
+        rows.append((OK if ok else WARN, "Indic engine", f"CUDA, {precision}"
+                     if ok else "device = cuda but PyTorch sees no GPU; "
+                     "it will run on CPU"))
+    return rows
+
+
 def checks(cfg: dict) -> list[tuple[str, str, str]]:
     """(status, label, detail) rows."""
     rows: list[tuple[str, str, str]] = []
@@ -91,11 +153,15 @@ def checks(cfg: dict) -> list[tuple[str, str, str]]:
     add(OK if sys.version_info >= (3, 11) else FAIL,
         "Python", sys.version.split()[0])
 
-    for mod in ("faster_whisper", "sounddevice", "numpy"):
+    engine = ("faster_whisper",) if cfg.get("asr_backend") != "indic" else ()
+    for mod in engine + ("sounddevice", "numpy"):
         found = importlib.util.find_spec(mod) is not None
         add(OK if found else FAIL, f"module {mod}",
             "" if found else "missing — reinstall omnihear "
             "(`sudo apt install --reinstall omnihear`) or pip install -r requirements.txt")
+
+    if cfg.get("asr_backend") == "indic":
+        rows.extend(_indic_rows(cfg))
 
     try:
         import sounddevice as sd
